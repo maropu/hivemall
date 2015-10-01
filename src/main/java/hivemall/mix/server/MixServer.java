@@ -52,6 +52,7 @@ public final class MixServer implements Runnable {
 
     private final int port;
     private final boolean ssl;
+    private final int numThreads;
     private final float scale;
     private final short syncThreshold;
     private final long sessionTTLinSec;
@@ -62,6 +63,8 @@ public final class MixServer implements Runnable {
     public MixServer(CommandLine cl) {
         this.port = Primitives.parseInt(cl.getOptionValue("port"), DEFAULT_PORT);
         this.ssl = cl.hasOption("ssl");
+        this.numThreads = Primitives.parseInt(cl.getOptionValue("num_threads"),
+                Runtime.getRuntime().availableProcessors());
         this.scale = Primitives.parseFloat(cl.getOptionValue("scale"), 1.f);
         this.syncThreshold = Primitives.parseShort(cl.getOptionValue("sync"), (short) 30);
         this.sessionTTLinSec = Primitives.parseLong(cl.getOptionValue("ttl"), 120L);
@@ -80,6 +83,7 @@ public final class MixServer implements Runnable {
         Options opts = new Options();
         opts.addOption("p", "port", true, "port number of the mix server [default: 11212]");
         opts.addOption("ssl", false, "Use SSL for the mix communication [default: false]");
+        opts.addOption("n", "num_threads", true, "number of threads to process requests [default: #cores]");
         opts.addOption("scale", "scalemodel", true, "Scale values of prediction models to avoid overflow [default: 1.0 (no-scale)]");
         opts.addOption("sync", "sync_threshold", true, "Synchronization threshold using clock difference [default: 30]");
         opts.addOption("ttl", "session_ttl", true, "The TTL in sec that an idle session lives [default: 120 sec]");
@@ -148,7 +152,7 @@ public final class MixServer implements Runnable {
     private void acceptConnections(@Nonnull MixServerInitializer initializer, int port)
             throws InterruptedException {
         final EventLoopGroup bossGroup = new NioEventLoopGroup(1);
-        final EventLoopGroup workerGroup = new NioEventLoopGroup();
+        final EventLoopGroup workerGroup = new NioEventLoopGroup(numThreads);
         try {
             ServerBootstrap b = new ServerBootstrap();
             b.option(ChannelOption.SO_KEEPALIVE, true);

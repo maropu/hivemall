@@ -76,7 +76,7 @@ public final class MixClient implements ModelUpdateHandler, Closeable {
     }
 
     private void initialize() throws Exception {
-        EventLoopGroup workerGroup = new NioEventLoopGroup();
+        EventLoopGroup workerGroup = new NioEventLoopGroup(1);
         NodeInfo[] serverNodes = router.getAllNodes();
         for(NodeInfo node : serverNodes) {
             Bootstrap b = new Bootstrap();

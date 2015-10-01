@@ -45,8 +45,13 @@ public class MixServerTest {
     @Test
     public void testSimpleScenario() throws InterruptedException {
         int port = NetUtils.getAvailablePort();
-        CommandLine cl = CommandLineUtils.parseOptions(new String[] { "-port",
-                Integer.toString(port), "-sync_threshold", "3" }, MixServer.getOptions());
+        CommandLine cl = CommandLineUtils.parseOptions(
+                new String[] {
+                    "-port", Integer.toString(port),
+                    "-num_threads", "2",
+                    "-sync_threshold", "3"
+                },
+                MixServer.getOptions());
         MixServer server = new MixServer(cl);
         ExecutorService serverExec = Executors.newSingleThreadExecutor();
         serverExec.submit(server);
@@ -82,8 +87,14 @@ public class MixServerTest {
     @Test
     public void testSSL() throws InterruptedException {
         int port = NetUtils.getAvailablePort();
-        CommandLine cl = CommandLineUtils.parseOptions(new String[] { "-port",
-                Integer.toString(port), "-sync_threshold", "3", "-ssl" }, MixServer.getOptions());
+        CommandLine cl = CommandLineUtils.parseOptions(
+                new String[] {
+                    "-port", Integer.toString(port),
+                    "-num_threads", "2",
+                    "-sync_threshold", "3",
+                    "-ssl"
+                },
+                MixServer.getOptions());
         MixServer server = new MixServer(cl);
         ExecutorService serverExec = Executors.newSingleThreadExecutor();
         serverExec.submit(server);
@@ -119,8 +130,13 @@ public class MixServerTest {
     @Test
     public void testMultipleClients() throws InterruptedException {
         final int port = NetUtils.getAvailablePort();
-        CommandLine cl = CommandLineUtils.parseOptions(new String[] { "-port",
-                Integer.toString(port), "-sync_threshold", "3" }, MixServer.getOptions());
+        CommandLine cl = CommandLineUtils.parseOptions(
+                new String[] {
+                    "-port", Integer.toString(port),
+                    "-num_threads", "2",
+                    "-sync_threshold", "3"
+                },
+                MixServer.getOptions());
         MixServer server = new MixServer(cl);
         ExecutorService serverExec = Executors.newSingleThreadExecutor();
         serverExec.submit(server);
@@ -175,8 +191,13 @@ public class MixServerTest {
     @Test
     public void test2ClientsZeroOneSparseModel() throws InterruptedException {
         final int port = NetUtils.getAvailablePort();
-        CommandLine cl = CommandLineUtils.parseOptions(new String[] { "-port",
-                Integer.toString(port), "-sync_threshold", "30" }, MixServer.getOptions());
+        CommandLine cl = CommandLineUtils.parseOptions(
+                new String[] {
+                    "-port", Integer.toString(port),
+                    "-num_threads", "2",
+                    "-sync_threshold", "30"
+                },
+                MixServer.getOptions());
         MixServer server = new MixServer(cl);
         ExecutorService serverExec = Executors.newSingleThreadExecutor();
         serverExec.submit(server);
@@ -204,8 +225,13 @@ public class MixServerTest {
     @Test
     public void test2ClientsZeroOneDenseModel() throws InterruptedException {
         final int port = NetUtils.getAvailablePort();
-        CommandLine cl = CommandLineUtils.parseOptions(new String[] { "-port",
-                Integer.toString(port), "-sync_threshold", "30" }, MixServer.getOptions());
+        CommandLine cl = CommandLineUtils.parseOptions(
+                new String[] {
+                    "-port", Integer.toString(port),
+                    "-num_threads", "2",
+                    "-sync_threshold", "30"
+                },
+                MixServer.getOptions());
         MixServer server = new MixServer(cl);
         ExecutorService serverExec = Executors.newSingleThreadExecutor();
         serverExec.submit(server);
@@ -233,8 +259,13 @@ public class MixServerTest {
     @Test
     public void test2ClientsZeroOneSparseModelWithMixCanceling() throws InterruptedException {
         final int port = NetUtils.getAvailablePort();
-        CommandLine cl = CommandLineUtils.parseOptions(new String[] { "-port",
-                Integer.toString(port), "-sync_threshold", "30" }, MixServer.getOptions());
+        CommandLine cl = CommandLineUtils.parseOptions(
+                new String[] {
+                    "-port", Integer.toString(port),
+                    "-num_threads", "2",
+                    "-sync_threshold", "30"
+                },
+                MixServer.getOptions());
         MixServer server = new MixServer(cl);
         ExecutorService serverExec = Executors.newSingleThreadExecutor();
         serverExec.submit(server);
@@ -262,8 +293,13 @@ public class MixServerTest {
     @Test
     public void test2ClientsZeroOneDenseModelWithMixCanceling() throws InterruptedException {
         final int port = NetUtils.getAvailablePort();
-        CommandLine cl = CommandLineUtils.parseOptions(new String[] { "-port",
-                Integer.toString(port), "-sync_threshold", "30" }, MixServer.getOptions());
+        CommandLine cl = CommandLineUtils.parseOptions(
+                new String[] {
+                    "-port", Integer.toString(port),
+                    "-num_threads", "2",
+                    "-sync_threshold", "30"
+                },
+                MixServer.getOptions());
         MixServer server = new MixServer(cl);
         ExecutorService serverExec = Executors.newSingleThreadExecutor();
         serverExec.submit(server);
