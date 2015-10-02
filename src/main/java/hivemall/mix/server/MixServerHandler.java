@@ -42,7 +42,10 @@ public final class MixServerHandler extends SimpleChannelInboundHandler<MixMessa
     private final int syncThreshold;
     private final float scale;
 
-    public MixServerHandler(@Nonnull SessionStore sessionStore, @Nonnegative int syncThreshold, @Nonnegative float scale) {
+    public MixServerHandler(
+            @Nonnull SessionStore sessionStore,
+            @Nonnegative int syncThreshold,
+            @Nonnegative float scale) {
         super();
         this.sessionStore = sessionStore;
         this.syncThreshold = syncThreshold;
@@ -89,7 +92,9 @@ public final class MixServerHandler extends SimpleChannelInboundHandler<MixMessa
     }
 
     @Nonnull
-    private PartialResult getPartialResult(@Nonnull MixMessage msg, @Nonnull SessionObject session) {
+    private PartialResult getPartialResult(
+            @Nonnull MixMessage msg,
+            @Nonnull SessionObject session) {
         final ConcurrentMap<Object, PartialResult> map = session.get();
 
         Object feature = msg.getFeature();
@@ -114,7 +119,10 @@ public final class MixServerHandler extends SimpleChannelInboundHandler<MixMessa
         return partial;
     }
 
-    private void mix(final ChannelHandlerContext ctx, final MixMessage requestMsg, final PartialResult partial, final SessionObject session) {
+    private void mix(final ChannelHandlerContext ctx,
+            final MixMessage requestMsg,
+            final PartialResult partial,
+            final SessionObject session) {
         final MixEventName event = requestMsg.getEvent();
         final Object feature = requestMsg.getFeature();
         final float weight = requestMsg.getWeight();
@@ -132,12 +140,14 @@ public final class MixServerHandler extends SimpleChannelInboundHandler<MixMessa
             } else {
                 int diffClock = partial.diffClock(clock);
                 partial.add(weight, covar, clock, deltaUpdates, scale);
-
-                if(diffClock >= syncThreshold) {// sync model if clock DIFF is above threshold
+                // Sync model if clock DIFF is above threshold
+                if(diffClock >= syncThreshold) {
                     float averagedWeight = partial.getWeight(scale);
                     float meanCovar = partial.getCovariance(scale);
                     short totalClock = partial.getClock();
-                    responseMsg = new MixMessage(event, feature, averagedWeight, meanCovar, totalClock, 0 /* deltaUpdates */);
+                    responseMsg = new MixMessage(
+                            event, feature, averagedWeight, meanCovar, totalClock,
+                            0); // deltaUpdates
                 }
             }
 
@@ -151,4 +161,8 @@ public final class MixServerHandler extends SimpleChannelInboundHandler<MixMessa
         }
     }
 
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        ctx.close();
+    }
 }

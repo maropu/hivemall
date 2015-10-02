@@ -23,9 +23,12 @@ import hivemall.mix.MixedModel;
 import io.netty.channel.ChannelHandler.Sharable;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 
 @Sharable
 public final class MixClientHandler extends SimpleChannelInboundHandler<MixMessage> {
+    private static final Log logger = LogFactory.getLog(MixClientHandler.class);
 
     private final MixedModel model;
 
@@ -46,4 +49,9 @@ public final class MixClientHandler extends SimpleChannelInboundHandler<MixMessa
         model.set(feature, weight, covar, clock);
     }
 
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        logger.error(cause.getMessage());
+        ctx.close();
+    }
 }
