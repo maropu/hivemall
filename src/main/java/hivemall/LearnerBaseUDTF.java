@@ -172,7 +172,11 @@ public abstract class LearnerBaseUDTF extends UDTFWithOptions {
             model.configureClock();
             model = new SynchronizedModelWrapper(model);
             MixClient client = configureMixClient(mixConnectInfo, label, model);
-            model.configureMix(client, mixCancel);
+            try {
+                model.configureMix(client.open(), mixCancel);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
             this.mixClient = client;
         }
         assert (model != null);
