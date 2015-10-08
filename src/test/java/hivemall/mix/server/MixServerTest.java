@@ -37,7 +37,6 @@ import java.util.concurrent.TimeUnit;
 import javax.annotation.Nonnegative;
 
 import org.junit.Assert;
-import org.junit.Ignore;
 import org.junit.Test;
 
 public class MixServerTest {
@@ -372,6 +371,7 @@ public class MixServerTest {
             serverExec.shutdown();
         } finally {
             IOUtils.closeQuietly(client);
+            server.close();
         }
     }
 
@@ -407,6 +407,7 @@ public class MixServerTest {
         clientsExec.awaitTermination(10, TimeUnit.SECONDS);
         clientsExec.shutdown();
         serverExec.shutdown();
+        server.close();
     }
 
 
@@ -443,6 +444,7 @@ public class MixServerTest {
         clientsExec.awaitTermination(10, TimeUnit.SECONDS);
         clientsExec.shutdown();
         serverExec.shutdown();
+        server.close();
     }
 
     private static void invokeClientEx(String groupId, int serverPort) throws Exception {

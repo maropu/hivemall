@@ -176,9 +176,6 @@ public final class MixClientEx extends AbstractMixClient {
     public void close() throws IOException {
         assert initialized;
         assert workers != null;
-        for(Channel ch : channelMap.values()) {
-            ch.close();
-        }
         channelMap.clear();
         workers.shutdownGracefully();
         initialized = false;

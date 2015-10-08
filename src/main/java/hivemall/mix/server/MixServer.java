@@ -36,6 +36,8 @@ import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.util.SelfSignedCertificate;
 
+import java.io.Closeable;
+import java.io.IOException;
 import java.security.cert.CertificateException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -44,16 +46,20 @@ import java.util.concurrent.TimeUnit;
 import javax.annotation.Nonnull;
 import javax.net.ssl.SSLException;
 
-public final class MixServer implements Runnable {
+public final class MixServer implements Runnable, Closeable {
 
     public static final int DEFAULT_PORT = 11212;
 
     private final MixServerArguments options;
+    private final EventLoopGroup bossGroup;
+    private final EventLoopGroup workerGroup;
 
     private volatile ServerState state;
 
     public MixServer(String[] args) {
         this.options = new MixServerArguments(args);
+        this.bossGroup = new NioEventLoopGroup(1);
+        this.workerGroup = new NioEventLoopGroup(options.getCores());
         this.state = ServerState.INITIALIZING;
     }
 
@@ -146,8 +152,6 @@ public final class MixServer implements Runnable {
 
     private void acceptConnections(@Nonnull BaseMixHandler msgHandler)
             throws CertificateException, SSLException, InterruptedException {
-        final EventLoopGroup bossGroup = new NioEventLoopGroup(1);
-        final EventLoopGroup workerGroup = new NioEventLoopGroup(options.getCores());
         final ScheduledExecutorService metricCollector =
                 Executors.newScheduledThreadPool(1);
         try {
@@ -181,9 +185,12 @@ public final class MixServer implements Runnable {
             ChannelFuture f = b.bind(options.getPort()).sync();
             this.state = ServerState.RUNNING;
             if (!options.isFork() && options.getWorkerTTLinSec() > 0) {
-                while (true) {
+                long ttl = 1000L * options.getWorkerTTLinSec();
+                while (f.channel().isOpen()) {
+                    Thread.sleep(1000L);
                     long elapsedTime = System.currentTimeMillis() - msgHandler.getLastHandled();
-                    if (elapsedTime > options.getWorkerTTLinSec() * 1000L) break;
+                    if (elapsedTime > ttl)
+                        break;
                 }
             } else {
                 // Wait until the server socket is closed.
@@ -197,8 +204,18 @@ public final class MixServer implements Runnable {
                 MetricsRegistry.unregisterMBeans(options.getPort());
             }
             metricCollector.shutdown();
-            workerGroup.shutdownGracefully();
-            bossGroup.shutdownGracefully();
+            close();
         }
+    }
+
+    @Override
+    public void close() {
+        // Netty v4.x user guide says "Shutting down a Netty application
+        // is usually as simple as shutting down all EventLoopGroups you created
+        // via shutdownGracefully(). It returns a Future that notifies you
+        // when the EventLoopGroup has been terminated completely and
+        // all Channels that belong to the group have been closed.".
+        workerGroup.shutdownGracefully();
+        bossGroup.shutdownGracefully();
     }
 }
