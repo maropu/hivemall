@@ -23,8 +23,8 @@ import hivemall.mix.metrics.MixServerMetrics;
 import hivemall.mix.metrics.ThroughputCounter;
 import hivemall.mix.store.SessionStore;
 import hivemall.mix.store.SessionStore.IdleSessionSweeper;
-import hivemall.utils.lang.CommandLineUtils;
-import hivemall.utils.lang.Primitives;
+import hivemall.mix.store.WorkerHandler;
+import hivemall.mix.store.WorkerHandler.StoppedWorkerSweeper;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelOption;
@@ -44,52 +44,25 @@ import java.util.concurrent.TimeUnit;
 import javax.annotation.Nonnull;
 import javax.net.ssl.SSLException;
 
-import org.apache.commons.cli.CommandLine;
-import org.apache.commons.cli.Options;
-
 public final class MixServer implements Runnable {
+
     public static final int DEFAULT_PORT = 11212;
 
-    private final int port;
-    private final boolean ssl;
-    private final int numThreads;
-    private final float scale;
-    private final short syncThreshold;
-    private final long sessionTTLinSec;
-    private final long sweepIntervalInSec;
-    private final boolean jmx;
+    private final MixServerArguments options;
+
     private volatile ServerState state;
 
-    public MixServer(CommandLine cl) {
-        this.port = Primitives.parseInt(cl.getOptionValue("port"), DEFAULT_PORT);
-        this.ssl = cl.hasOption("ssl");
-        this.numThreads = Primitives.parseInt(cl.getOptionValue("num_threads"),
-                Runtime.getRuntime().availableProcessors());
-        this.scale = Primitives.parseFloat(cl.getOptionValue("scale"), 1.f);
-        this.syncThreshold = Primitives.parseShort(cl.getOptionValue("sync"), (short) 30);
-        this.sessionTTLinSec = Primitives.parseLong(cl.getOptionValue("ttl"), 120L);
-        this.sweepIntervalInSec = Primitives.parseLong(cl.getOptionValue("sweep"), 60L);
-        this.jmx = cl.hasOption("jmx");
+    public MixServer(String[] args) {
+        this.options = new MixServerArguments(args);
         this.state = ServerState.INITIALIZING;
     }
 
-    public static void main(String[] args) {
-        Options opts = getOptions();
-        CommandLine cl = CommandLineUtils.parseOptions(args, opts);
-        new MixServer(cl).run();
+    public enum ServerState {
+        INITIALIZING, RUNNING, STOPPING,
     }
 
-    static Options getOptions() {
-        Options opts = new Options();
-        opts.addOption("p", "port", true, "port number of the mix server [default: 11212]");
-        opts.addOption("ssl", false, "Use SSL for the mix communication [default: false]");
-        opts.addOption("n", "num_threads", true, "number of threads to process requests [default: #cores]");
-        opts.addOption("scale", "scalemodel", true, "Scale values of prediction models to avoid overflow [default: 1.0 (no-scale)]");
-        opts.addOption("sync", "sync_threshold", true, "Synchronization threshold using clock difference [default: 30]");
-        opts.addOption("ttl", "session_ttl", true, "The TTL in sec that an idle session lives [default: 120 sec]");
-        opts.addOption("sweep", "session_sweep_interval", true, "The interval in sec that the session expiry thread runs [default: 60 sec]");
-        opts.addOption("jmx", "metrics", false, "Toggle this option to enable monitoring metrics using JMX [default: false]");
-        return opts;
+    public static void main(String[] args) {
+        new MixServer(args).run();
     }
 
     public ServerState getState() {
@@ -110,74 +83,122 @@ public final class MixServer implements Runnable {
     }
 
     public void start() throws CertificateException, SSLException, InterruptedException {
-        // Configure SSL.
-        final SslContext sslCtx;
-        if(ssl) {
-            SelfSignedCertificate ssc = new SelfSignedCertificate();
-            sslCtx = SslContext.newServerContext(ssc.certificate(), ssc.privateKey());
-        } else {
-            sslCtx = null;
-        }
+        if (options.isFork()) {
+            final ScheduledExecutorService idleSessionChecker =
+                    Executors.newScheduledThreadPool(1);
+            final ScheduledExecutorService stoppedWorkerChecker =
+                    Executors.newScheduledThreadPool(1);
+            final WorkerHandler workerHandler =
+                    new WorkerHandler(options, options.getCores(), options.getMemoryMb());
+            try {
+                // Start idle session sweeper
+                SessionStore sessions = new SessionStore();
+                Runnable cleanSessionTask = new IdleSessionSweeper(
+                        sessions, options.getSessionTTLinSec() * 1000L);
+                idleSessionChecker.scheduleAtFixedRate(
+                        cleanSessionTask,
+                        options.getSessionTTLinSec() + 10L,
+                        options.getSweepSessionIntervalInSec(),
+                        TimeUnit.SECONDS);
 
-        // configure metrics
-        ScheduledExecutorService metricCollector = Executors.newScheduledThreadPool(1);
-        MixServerMetrics metrics = new MixServerMetrics();
-        ThroughputCounter throughputCounter = new ThroughputCounter(metricCollector, 5000L, metrics);
-        if(jmx) {// register mbean
-            MetricsRegistry.registerMBeans(metrics, port);
-        }
+                // Start a sweeper for stopped workers
+                Runnable cleanWorkerTask = new StoppedWorkerSweeper(workerHandler);
+                stoppedWorkerChecker.scheduleAtFixedRate(
+                        cleanWorkerTask,
+                        options.getSweepWorkerIntervalInSec() + 10L,
+                        options.getSweepWorkerIntervalInSec(),
+                        TimeUnit.SECONDS);
 
-        // configure initializer
-        SessionStore sessionStore = new SessionStore();
-        MixServerHandler msgHandler = new MixServerHandler(sessionStore, syncThreshold, scale);
-        MixServerInitializer initializer = new MixServerInitializer(msgHandler, throughputCounter, sslCtx);
-
-        Runnable cleanSessionTask = new IdleSessionSweeper(sessionStore, sessionTTLinSec * 1000L);
-        ScheduledExecutorService idleSessionChecker = Executors.newScheduledThreadPool(1);
-        try {
-            // start idle session sweeper
-            idleSessionChecker.scheduleAtFixedRate(cleanSessionTask, sessionTTLinSec + 10L, sweepIntervalInSec, TimeUnit.SECONDS);
-            // accept connections
-            acceptConnections(initializer, port);
-        } finally {
-            // release threads
-            idleSessionChecker.shutdownNow();
-            if(jmx) {
-                MetricsRegistry.unregisterMBeans(port);
+                // Accept connections
+                acceptConnections(new ForkWorkerHandler(
+                        workerHandler, sessions, options.getSyncThreshold(),
+                        options.getScale()));
+            } finally {
+                // Release threads
+                idleSessionChecker.shutdownNow();
+                stoppedWorkerChecker.shutdown();
+                workerHandler.close();
             }
-            metricCollector.shutdownNow();
+        } else {
+            final ScheduledExecutorService idleSessionChecker =
+                    Executors.newScheduledThreadPool(1);
+            try {
+                // Start idle session sweeper
+                SessionStore sessions = new SessionStore();
+                Runnable cleanSessionTask = new IdleSessionSweeper(
+                        sessions, options.getSessionTTLinSec() * 1000L);
+                idleSessionChecker.scheduleAtFixedRate(
+                        cleanSessionTask,
+                        options.getSessionTTLinSec() + 10L,
+                        options.getSweepSessionIntervalInSec(),
+                        TimeUnit.SECONDS);
+
+                // Accept connections
+                acceptConnections(new MixWorkerHandler(
+                        sessions, options.getSyncThreshold(),
+                        options.getScale()));
+            } finally {
+                // Release threads
+                idleSessionChecker.shutdownNow();
+            }
         }
     }
 
-    private void acceptConnections(@Nonnull MixServerInitializer initializer, int port)
-            throws InterruptedException {
+    private void acceptConnections(@Nonnull BaseMixHandler msgHandler)
+            throws CertificateException, SSLException, InterruptedException {
         final EventLoopGroup bossGroup = new NioEventLoopGroup(1);
-        final EventLoopGroup workerGroup = new NioEventLoopGroup(numThreads);
+        final EventLoopGroup workerGroup = new NioEventLoopGroup(options.getCores());
+        final ScheduledExecutorService metricCollector =
+                Executors.newScheduledThreadPool(1);
         try {
+            // Configure SSL
+            final SslContext sslCtx;
+            if(options.isSsl()) {
+                SelfSignedCertificate ssc = new SelfSignedCertificate();
+                sslCtx = SslContext.newServerContext(ssc.certificate(), ssc.privateKey());
+            } else {
+                sslCtx = null;
+            }
+
+            // Configure metrics
+            MixServerMetrics metrics = new MixServerMetrics();
+            ThroughputCounter throughputCounter =
+                    new ThroughputCounter(metricCollector, 5000L, metrics);
+
+            // Register mbean
+            if (options.isJmx()) {
+                MetricsRegistry.registerMBeans(metrics, options.getPort());
+            }
+
             ServerBootstrap b = new ServerBootstrap();
             b.option(ChannelOption.SO_KEEPALIVE, true);
             b.group(bossGroup, workerGroup);
             b.channel(NioServerSocketChannel.class);
             b.handler(new LoggingHandler(LogLevel.INFO));
-            b.childHandler(initializer);
+            b.childHandler(new MixServerInitializer(msgHandler, throughputCounter, sslCtx));
 
             // Bind and start to accept incoming connections.
-            ChannelFuture f = b.bind(port).sync();
+            ChannelFuture f = b.bind(options.getPort()).sync();
             this.state = ServerState.RUNNING;
-
-            // Wait until the server socket is closed.
-            // In this example, this does not happen, but you can do that to gracefully
-            // shut down your server.
-            f.channel().closeFuture().sync();
+            if (!options.isFork() && options.getWorkerTTLinSec() > 0) {
+                while (true) {
+                    long elapsedTime = System.currentTimeMillis() - msgHandler.getLastHandled();
+                    if (elapsedTime > options.getWorkerTTLinSec() * 1000L) break;
+                }
+            } else {
+                // Wait until the server socket is closed.
+                // In this example, this does not happen, but you can do that to gracefully
+                // shut down your server.
+                f.channel().closeFuture().sync();
+            }
         } finally {
             this.state = ServerState.STOPPING;
+            if (options.isJmx()) {
+                MetricsRegistry.unregisterMBeans(options.getPort());
+            }
+            metricCollector.shutdown();
             workerGroup.shutdownGracefully();
             bossGroup.shutdownGracefully();
         }
     }
-
-    public enum ServerState {
-        INITIALIZING, RUNNING, STOPPING,
-    }
-
 }

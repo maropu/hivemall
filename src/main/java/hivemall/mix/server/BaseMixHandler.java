@@ -18,31 +18,26 @@
  */
 package hivemall.mix.server;
 
+import hivemall.mix.AbstractMixMessageHandler;
 import hivemall.mix.MixMessage;
 import hivemall.mix.MixMessage.MixEventName;
-import hivemall.mix.store.PartialArgminKLD;
-import hivemall.mix.store.PartialAverage;
-import hivemall.mix.store.PartialResult;
-import hivemall.mix.store.SessionObject;
-import hivemall.mix.store.SessionStore;
-import io.netty.channel.ChannelHandler.Sharable;
+import hivemall.mix.store.*;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.SimpleChannelInboundHandler;
-
-import java.util.concurrent.ConcurrentMap;
 
 import javax.annotation.Nonnegative;
 import javax.annotation.Nonnull;
+import java.util.concurrent.ConcurrentMap;
 
-@Sharable
-public final class MixServerHandler extends SimpleChannelInboundHandler<MixMessage> {
+public abstract class BaseMixHandler extends AbstractMixMessageHandler {
 
     @Nonnull
     private final SessionStore sessionStore;
     private final int syncThreshold;
     private final float scale;
 
-    public MixServerHandler(
+    private volatile long lastHandled;
+
+    public BaseMixHandler(
             @Nonnull SessionStore sessionStore,
             @Nonnegative int syncThreshold,
             @Nonnegative float scale) {
@@ -50,38 +45,19 @@ public final class MixServerHandler extends SimpleChannelInboundHandler<MixMessa
         this.sessionStore = sessionStore;
         this.syncThreshold = syncThreshold;
         this.scale = scale;
+        this.lastHandled = System.currentTimeMillis();
     }
 
-    @Override
-    protected void channelRead0(ChannelHandlerContext ctx, MixMessage msg) throws Exception {
-        final MixEventName event = msg.getEvent();
-        switch(event) {
-            case average:
-            case argminKLD: {
-                SessionObject session = getSession(msg);
-                PartialResult partial = getPartialResult(msg, session);
-                mix(ctx, msg, partial, session);
-                break;
-            }
-            case closeGroup: {
-                closeGroup(msg);
-                break;
-            }
-            default:
-                throw new IllegalStateException("Unexpected event: " + event);
-        }
+    public long getLastHandled() {
+        return lastHandled;
     }
 
-    private void closeGroup(@Nonnull MixMessage msg) {
-        String groupId = msg.getGroupID();
-        if(groupId == null) {
-            return;
-        }
-        sessionStore.remove(groupId);
+    public void setLastHandled(long lastHandled) {
+        this.lastHandled = lastHandled;
     }
 
     @Nonnull
-    private SessionObject getSession(@Nonnull MixMessage msg) {
+    protected SessionObject getSession(@Nonnull MixMessage msg) {
         String groupID = msg.getGroupID();
         if(groupID == null) {
             throw new IllegalStateException("JobID is not set in the request message");
@@ -91,8 +67,16 @@ public final class MixServerHandler extends SimpleChannelInboundHandler<MixMessa
         return session;
     }
 
+    protected void closeGroup(@Nonnull MixMessage msg) {
+        String groupId = msg.getGroupID();
+        if(groupId == null) {
+            return;
+        }
+        sessionStore.remove(groupId);
+    }
+
     @Nonnull
-    private PartialResult getPartialResult(
+    protected static PartialResult getPartialResult(
             @Nonnull MixMessage msg,
             @Nonnull SessionObject session) {
         final ConcurrentMap<Object, PartialResult> map = session.get();
@@ -119,7 +103,7 @@ public final class MixServerHandler extends SimpleChannelInboundHandler<MixMessa
         return partial;
     }
 
-    private void mix(final ChannelHandlerContext ctx,
+    protected void mix(final ChannelHandlerContext ctx,
             final MixMessage requestMsg,
             final PartialResult partial,
             final SessionObject session) {

@@ -27,7 +27,9 @@ import hivemall.io.SynchronizedModelWrapper;
 import hivemall.io.WeightValue;
 import hivemall.io.WeightValue.WeightValueWithCovar;
 import hivemall.mix.MixMessage.MixEventName;
+import hivemall.mix.client.AbstractMixClient;
 import hivemall.mix.client.MixClient;
+import hivemall.mix.client.MixClientEx;
 import hivemall.utils.datetime.StopWatch;
 import hivemall.utils.hadoop.HadoopUtils;
 import hivemall.utils.hadoop.HiveUtils;
@@ -69,9 +71,10 @@ public abstract class LearnerBaseUDTF extends UDTFWithOptions {
     protected String mixSessionName;
     protected int mixThreshold;
     protected boolean mixCancel;
+    protected boolean mixFork;
     protected boolean ssl;
 
-    protected MixClient mixClient;
+    protected AbstractMixClient mixClient;
 
     public LearnerBaseUDTF() {}
 
@@ -90,6 +93,7 @@ public abstract class LearnerBaseUDTF extends UDTFWithOptions {
         opts.addOption("mix_session", "mix_session_name", true, "Mix session name [default: ${mapred.job.id}]");
         opts.addOption("mix_threshold", true, "Threshold to mix local updates in range (0,127] [default: 3]");
         opts.addOption("mix_cancel", "enable_mix_canceling", false, "Enable mix cancel requests");
+        opts.addOption("mix_fork", "enable_fork_mix_worker", false, "Enable a mode to fork mix workers");
         opts.addOption("ssl", false, "Use SSL for the communication with mix servers");
         return opts;
     }
@@ -106,6 +110,7 @@ public abstract class LearnerBaseUDTF extends UDTFWithOptions {
         String mixSessionName = null;
         int mixThreshold = -1;
         boolean mixCancel = false;
+        boolean mixFork = false;
         boolean ssl = false;
 
         CommandLine cl = null;
@@ -130,6 +135,7 @@ public abstract class LearnerBaseUDTF extends UDTFWithOptions {
                         + mixThreshold);
             }
             mixCancel = cl.hasOption("mix_cancel");
+            mixFork = cl.hasOption("mix_fork");
             ssl = cl.hasOption("ssl");
         }
 
@@ -141,6 +147,7 @@ public abstract class LearnerBaseUDTF extends UDTFWithOptions {
         this.mixSessionName = mixSessionName;
         this.mixThreshold = mixThreshold;
         this.mixCancel = mixCancel;
+        this.mixFork = mixFork;
         this.ssl = ssl;
         return cl;
     }
@@ -171,7 +178,7 @@ public abstract class LearnerBaseUDTF extends UDTFWithOptions {
         if(mixConnectInfo != null) {
             model.configureClock();
             model = new SynchronizedModelWrapper(model);
-            MixClient client = configureMixClient(mixConnectInfo, label, model);
+            AbstractMixClient client = configureMixClient(mixConnectInfo, label, model);
             try {
                 model.configureMix(client.open(), mixCancel);
             } catch (Exception e) {
@@ -183,7 +190,7 @@ public abstract class LearnerBaseUDTF extends UDTFWithOptions {
         return model;
     }
 
-    protected MixClient configureMixClient(String connectURIs, String label, PredictionModel model) {
+    protected AbstractMixClient configureMixClient(String connectURIs, String label, PredictionModel model) {
         assert (connectURIs != null);
         assert (model != null);
         String jobId = (mixSessionName == null) ? MixClient.DUMMY_JOB_ID : mixSessionName;
@@ -191,7 +198,12 @@ public abstract class LearnerBaseUDTF extends UDTFWithOptions {
             jobId = jobId + '-' + label;
         }
         MixEventName event = useCovariance() ? MixEventName.argminKLD : MixEventName.average;
-        MixClient client = new MixClient(event, jobId, connectURIs, ssl, mixThreshold, model);
+        AbstractMixClient client;
+        if (mixFork) {
+            client = new MixClientEx(event, jobId, connectURIs, ssl, mixThreshold, model);
+        } else {
+            client = new MixClient(event, jobId, connectURIs, ssl, mixThreshold, model);
+        }
         logger.info("Successfully configured mix client: " + connectURIs);
         return client;
     }

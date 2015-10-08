@@ -18,16 +18,16 @@
  */
 package hivemall.mix.client;
 
+import hivemall.mix.AbstractMixMessageHandler;
 import hivemall.mix.MixMessage;
 import hivemall.mix.MixedModel;
 import io.netty.channel.ChannelHandler.Sharable;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.SimpleChannelInboundHandler;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
 @Sharable
-public final class MixClientHandler extends SimpleChannelInboundHandler<MixMessage> {
+public final class MixClientHandler extends AbstractMixMessageHandler {
     private static final Log logger = LogFactory.getLog(MixClientHandler.class);
 
     private final MixedModel model;

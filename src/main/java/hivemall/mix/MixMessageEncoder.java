@@ -70,6 +70,15 @@ public final class MixMessageEncoder extends MessageToByteEncoder<MixMessage> {
         boolean cancelRequest = msg.isCancelRequest();
         out.writeBoolean(cancelRequest);
 
+        int workerPort = msg.getWorkerPort();
+        out.writeInt(workerPort);
+
+        int cores = msg.getCores();
+        out.writeInt(cores);
+
+        int memoryMb = msg.getMemoryMb();
+        out.writeInt(memoryMb);
+
         String groupId = msg.getGroupID();
         writeString(groupId, out);
 
@@ -117,5 +126,4 @@ public final class MixMessageEncoder extends MessageToByteEncoder<MixMessage> {
         buf.writeInt(length);
         buf.writeBytes(b, 0, length);
     }
-
 }

@@ -58,7 +58,7 @@ public abstract class AbstractMixClient implements ModelUpdateHandler, Closeable
     /**
      * Initialization, e.g., handling connections to mix servers.
      */
-    abstract public MixClient open() throws Exception;
+    abstract public AbstractMixClient open() throws Exception;
 
     /**
      * Send a given message to one of mix servers.

@@ -18,6 +18,7 @@
  */
 package hivemall.mix.server;
 
+import hivemall.mix.AbstractMixMessageHandler;
 import hivemall.mix.MixMessageDecoder;
 import hivemall.mix.MixMessageEncoder;
 import hivemall.mix.metrics.ThroughputCounter;
@@ -32,13 +33,20 @@ import javax.annotation.Nullable;
 public final class MixServerInitializer extends ChannelInitializer<SocketChannel> {
 
     @Nonnull
-    private final MixServerHandler requestHandler;
+    private final AbstractMixMessageHandler requestHandler;
     @Nullable
     private final ThroughputCounter throughputCounter;
     @Nullable
     private final SslContext sslCtx;
 
-    public MixServerInitializer(@Nonnull MixServerHandler msgHandler, @Nullable ThroughputCounter throughputCounter, @Nullable SslContext sslCtx) {
+    public MixServerInitializer(@Nonnull AbstractMixMessageHandler msgHandler) {
+        this(msgHandler, null, null);
+    }
+
+    public MixServerInitializer(
+            @Nonnull AbstractMixMessageHandler msgHandler,
+            @Nullable ThroughputCounter throughputCounter,
+            @Nullable SslContext sslCtx) {
         this.requestHandler = msgHandler;
         this.throughputCounter = throughputCounter;
         this.sslCtx = sslCtx;
@@ -60,5 +68,4 @@ public final class MixServerInitializer extends ChannelInitializer<SocketChannel
             pipeline.addLast(decoder, encoder, requestHandler);
         }
     }
-
 }

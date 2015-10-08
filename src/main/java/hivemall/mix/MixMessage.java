@@ -32,24 +32,45 @@ public final class MixMessage implements Externalizable {
     private short clock;
     private int deltaUpdates;
     private boolean cancelRequest;
+    private int workerPort;
+    private int cores;
+    private int memoryMb;
 
     private String groupID;
 
     public MixMessage() {} // for Externalizable
 
-    public MixMessage(MixEventName event, Object feature, float weight, short clock, int deltaUpdates) {
-        this(event, feature, weight, 0.f, clock, deltaUpdates, false);
+    public MixMessage(MixEventName event) {
+        this(event, "", 0.f, 0.f, (short) 0, 0, false, -1, 0, 0);
     }
 
-    public MixMessage(MixEventName event, Object feature, float weight, float covariance, short clock, int deltaUpdates) {
-        this(event, feature, weight, covariance, clock, deltaUpdates, false);
+    public MixMessage(MixEventName event, int cores, int memoryMb) {
+        this(event, "", 0.f, 0.f, (short) 0, 0, false, -1, cores, memoryMb);
     }
 
-    public MixMessage(MixEventName event, Object feature, float weight, float covariance, int deltaUpdates, boolean cancelRequest) {
-        this(event, feature, weight, covariance, (short) 0 /* dummy clock */, deltaUpdates, cancelRequest);
+    public MixMessage(MixEventName event, int workerPort) {
+        this(event, "", 0.f, 0.f, (short) 0, 0, false, workerPort, 0, 0);
     }
 
-    MixMessage(MixEventName event, Object feature, float weight, float covariance, short clock, int deltaUpdates, boolean cancelRequest) {
+    public MixMessage(MixEventName event, Object feature, float weight,
+                      short clock, int deltaUpdates) {
+        this(event, feature, weight, 0.f, clock, deltaUpdates, false, -1, 0, 0);
+    }
+
+    public MixMessage(MixEventName event, Object feature, float weight, float covariance,
+                      short clock, int deltaUpdates) {
+        this(event, feature, weight, covariance, clock, deltaUpdates, false, -1, 0, 0);
+    }
+
+    public MixMessage(MixEventName event, Object feature, float weight, float covariance,
+                      int deltaUpdates, boolean cancelRequest) {
+        this(event, feature, weight, covariance,
+                (short) 0 /* dummy clock */, deltaUpdates, cancelRequest, -1, 0, 0);
+    }
+
+    MixMessage(MixEventName event, Object feature, float weight, float covariance,
+               short clock, int deltaUpdates, boolean cancelRequest, int workerPort,
+               int cores, int memoryMb) {
         if(feature == null) {
             throw new IllegalArgumentException("feature is null");
         }
@@ -63,10 +84,21 @@ public final class MixMessage implements Externalizable {
         this.clock = clock;
         this.deltaUpdates = deltaUpdates;
         this.cancelRequest = cancelRequest;
+        this.workerPort = workerPort;
+        this.cores = cores;
+        this.memoryMb = memoryMb;
     }
 
     public enum MixEventName {
-        average((byte) 1), argminKLD((byte) 2), closeGroup((byte) 3);
+        average((byte) 1),
+        argminKLD((byte) 2),
+        closeGroup((byte) 3),
+        forkWorker((byte) 4),
+        // Use ping/ack/killWorker to handle the
+        // state of mix workers.
+        ping((byte) 5),
+        ack((byte) 6),
+        killWorker((byte) 7);
 
         private final byte id;
 
@@ -80,12 +112,14 @@ public final class MixMessage implements Externalizable {
 
         public static MixEventName resolve(int b) {
             switch(b) {
-                case 1:
-                    return average;
-                case 2:
-                    return argminKLD;
-                default:
-                    throw new IllegalArgumentException("Illegal ID: " + b);
+                case 1: return average;
+                case 2: return argminKLD;
+                case 3: return closeGroup;
+                case 4: return forkWorker;
+                case 5: return ping;
+                case 6: return ack;
+                case 7: return killWorker;
+                default: throw new IllegalArgumentException("Illegal ID: " + b);
             }
         }
     }
@@ -126,6 +160,18 @@ public final class MixMessage implements Externalizable {
         return cancelRequest;
     }
 
+    public int getWorkerPort() {
+        return workerPort;
+    }
+
+    public int getCores() {
+        return cores;
+    }
+
+    public int getMemoryMb() {
+        return memoryMb;
+    }
+
     @Override
     public void writeExternal(ObjectOutput out) throws IOException {
         out.writeByte(event.getID());
@@ -135,6 +181,9 @@ public final class MixMessage implements Externalizable {
         out.writeShort(clock);
         out.writeInt(deltaUpdates);
         out.writeBoolean(cancelRequest);
+        out.writeInt(workerPort);
+        out.writeInt(cores);
+        out.writeInt(memoryMb);
         if(groupID == null) {
             out.writeBoolean(false);
         } else {
@@ -153,6 +202,9 @@ public final class MixMessage implements Externalizable {
         this.clock = in.readShort();
         this.deltaUpdates = in.readInt();
         this.cancelRequest = in.readBoolean();
+        this.workerPort = in.readInt();
+        this.cores = in.readInt();
+        this.memoryMb = in.readInt();
         boolean hasGroupID = in.readBoolean();
         if(hasGroupID) {
             this.groupID = in.readUTF();
@@ -163,7 +215,9 @@ public final class MixMessage implements Externalizable {
     public String toString() {
         return "MixMessage [event=" + event + ", feature=" + feature + ", weight=" + weight
                 + ", covariance=" + covariance + ", clock=" + clock + ", deltaUpdates="
-                + deltaUpdates + ", cancel=" + cancelRequest + ", groupID=" + groupID + "]";
+                + deltaUpdates + ", cancel=" + cancelRequest
+                + ", workerPort=" + workerPort
+                + ", cores=" + cores + ", memoryMb=" + memoryMb
+                + ", groupID=" + groupID + "]";
     }
-
 }

@@ -18,6 +18,7 @@
  */
 package hivemall.mix.client;
 
+import hivemall.mix.AbstractMixMessageHandler;
 import hivemall.mix.MixMessageDecoder;
 import hivemall.mix.MixMessageEncoder;
 import io.netty.channel.ChannelInitializer;
@@ -27,10 +28,10 @@ import io.netty.handler.ssl.SslContext;
 
 public final class MixClientInitializer extends ChannelInitializer<SocketChannel> {
 
-    private final MixClientHandler responseHandler;
+    private final AbstractMixMessageHandler responseHandler;
     private final SslContext sslCtx;
 
-    public MixClientInitializer(MixClientHandler msgHandler, SslContext sslCtx) {
+    public MixClientInitializer(AbstractMixMessageHandler msgHandler, SslContext sslCtx) {
         if(msgHandler == null) {
             throw new IllegalArgumentException();
         }
@@ -49,5 +50,4 @@ public final class MixClientInitializer extends ChannelInitializer<SocketChannel
         MixMessageDecoder decoder = new MixMessageDecoder();
         pipeline.addLast(encoder, decoder, responseHandler);
     }
-
 }
