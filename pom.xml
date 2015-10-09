@@ -313,6 +313,7 @@
 								<include>org.apache.hadoop:hadoop-core</include>
 								<include>org.apache.hive:hive-exec</include>
 								<include>org.apache.hive:hive-serde</include>
+								<include>io.netty:netty-all</include>
 								<include>commons-cli:commons-cli</include>
 								<include>commons-logging:commons-logging</include>
 								<include>com.google.code.findbugs:jsr305</include>
