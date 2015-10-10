@@ -30,9 +30,6 @@ import javax.annotation.Nonnull;
 @ChannelHandler.Sharable
 public final class ForkWorkerHandler extends BaseMixHandler {
 
-    static MixMessage FORK_FAILURE_MESSAGE =
-            new MixMessage(MixEventName.forkWorker, -1);
-
     private final WorkerHandler handler;
 
     public ForkWorkerHandler(
@@ -49,7 +46,7 @@ public final class ForkWorkerHandler extends BaseMixHandler {
         final MixEventName event = msg.getEvent();
         switch(event) {
             case forkWorker: {
-                MixMessage responseMsg = FORK_FAILURE_MESSAGE;
+                MixMessage responseMsg;
                 final String groupID = msg.getGroupID();
                 final int cores = msg.getCores();
                 final int memoryMb = msg.getMemoryMb();
@@ -61,7 +58,8 @@ public final class ForkWorkerHandler extends BaseMixHandler {
                     worker.waitForRunning();
                     responseMsg = new MixMessage(MixEventName.forkWorker, worker.getPort());
                 } catch (Exception e) {
-                    logger.warn(e.getMessage());
+                    responseMsg = new MixMessage(MixEventName.forkWorker, -1);
+                    responseMsg.setMessage(e.getMessage());
                 }
                 ctx.writeAndFlush(responseMsg).sync();
                 break;

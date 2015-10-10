@@ -128,6 +128,9 @@ public final class MixClientEx extends AbstractMixClient {
                 throw new IllegalStateException("Unexpected event: " + event);
             }
             final int port = msg.getWorkerPort();
+            if (port == -1) {
+                throw new IllegalStateException(msg.getMessage());
+            }
             Channel workerCh = initWorkerChannel(new NodeInfo(node.getAddress(), port));
             channelMap.put(node, workerCh);
         }

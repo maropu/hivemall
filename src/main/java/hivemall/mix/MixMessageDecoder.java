@@ -60,11 +60,13 @@ public final class MixMessageDecoder extends LengthFieldBasedFrameDecoder {
         int cores = frame.readInt();
         int memoryMb = frame.readInt();
         String groupID = readString(frame);
+        String message = readString(frame);
 
         MixMessage msg = new MixMessage(
                 event, feature, weight, covariance, clock, deltaUpdates, cancelRequest,
                 workerPort, cores ,memoryMb);
         msg.setGroupID(groupID);
+        msg.setMessage(message);
         return msg;
     }
 

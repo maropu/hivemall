@@ -38,6 +38,8 @@ public final class MixMessage implements Externalizable {
 
     private String groupID;
 
+    private String message;
+
     public MixMessage() {} // for Externalizable
 
     public MixMessage(MixEventName event) {
@@ -154,6 +156,14 @@ public final class MixMessage implements Externalizable {
 
     public void setGroupID(String groupID) {
         this.groupID = groupID;
+    }
+
+    public String getMessage() {
+        return message;
+    }
+
+    public void setMessage(String message) {
+        this.message = message;
     }
 
     public boolean isCancelRequest() {

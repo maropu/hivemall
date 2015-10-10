@@ -82,6 +82,9 @@ public final class MixMessageEncoder extends MessageToByteEncoder<MixMessage> {
         String groupId = msg.getGroupID();
         writeString(groupId, out);
 
+        String message = msg.getMessage();
+        writeString(message, out);
+
         int endIdx = out.writerIndex();
         out.setInt(startIdx, endIdx - startIdx - 4);
     }
