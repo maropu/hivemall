@@ -42,8 +42,7 @@ import org.apache.log4j.LogManager;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public final class ApplicationMaster {
@@ -73,11 +72,17 @@ public final class ApplicationMaster {
     private int requestPriority;
     private int numRetryForFailedConainers;
 
-    // Launched threads
-    private final List<Thread> launchThreads = new ArrayList<Thread>();
+    // Thread pool for container launchers
+    private final ExecutorService containerExecutor =
+            Executors.newFixedThreadPool(1);
 
-    private final Set<ContainerId> launchedContainers =
-            Collections.newSetFromMap(new ConcurrentHashMap<ContainerId, Boolean>());
+    // List of allocated containers and alive MIX servers
+    private ConcurrentMap<ContainerId, Container> allocContainers =
+            new ConcurrentHashMap<ContainerId, Container>();
+    private ConcurrentMap<ContainerId, NodeId> activeMixServers =
+            new ConcurrentHashMap<ContainerId, NodeId>();
+
+    // Trackers for container status
     private final AtomicInteger numAllocatedContainers = new AtomicInteger();
     private final AtomicInteger numRequestedContainers = new AtomicInteger();
     private final AtomicInteger numCompletedContainers = new AtomicInteger();
@@ -240,12 +245,13 @@ public final class ApplicationMaster {
 
                 // Ignore containers we know nothing about - probably
                 // from a previous attempt.
-                if (!launchedContainers.contains(containerStatus.getContainerId())) {
-                    logger.info("Ignoring completed status of "
-                            + containerStatus.getContainerId()
+                if (!allocContainers.containsKey(containerStatus.getContainerId())) {
+                    logger.warn("Ignoring completed status of " + containerStatus.getContainerId()
                             + "; unknown container (probably launched by previous attempt)");
                     continue;
                 }
+
+                allocContainers.remove(containerStatus.getContainerId());
 
                 // Increment counters for completed/failed containers
                 int exitStatus = containerStatus.getExitStatus();
@@ -283,23 +289,24 @@ public final class ApplicationMaster {
             logger.info("Got response from RM for container ask, allocatedCnt="
                     + allocatedContainers.size());
             numAllocatedContainers.addAndGet(allocatedContainers.size());
-            for (Container allocatedContainer : allocatedContainers) {
+            for (Container container: allocatedContainers) {
                 logger.info("Launching a mix server on a new container: "
-                        + "containerId=" + allocatedContainer.getId()
-                        + ", containerNode=" + allocatedContainer.getNodeId().getHost()
-                            + ":" + allocatedContainer.getNodeId().getPort()
-                        + ", containerNodeURI=" + allocatedContainer.getNodeHttpAddress()
-                        + ", containerResourceMemory=" + allocatedContainer.getResource().getMemory()
+                        + "containerId=" + container.getId()
+                        + ", containerNode=" + container.getNodeId().getHost()
+                            + ":" + container.getNodeId().getPort()
+                        + ", containerNodeURI=" + container.getNodeHttpAddress()
+                        + ", containerResourceMemory=" + container.getResource().getMemory()
                         + ", containerResourceVirtualCores="
-                            + allocatedContainer.getResource().getVirtualCores());
+                            + container.getResource().getVirtualCores());
+
+                allocContainers.put(container.getId(), container);
 
                 // Launch and start the container on a separate thread to keep
                 // the main thread unblocked as all containers
                 // may not be allocated at one go.
-                Thread launchThread = createLaunchContainerThread(allocatedContainer);
-                launchThreads.add(launchThread);
-                launchedContainers.add(allocatedContainer.getId());
-                launchThread.start();
+                containerExecutor.submit(
+                        createLaunchContainerThread(container));
+
             }
         }
 
@@ -326,17 +333,10 @@ public final class ApplicationMaster {
 
     private class NMCallbackHandler implements NMClientAsync.CallbackHandler {
 
-        private final ApplicationMaster applicationMaster;
+        private final ApplicationMaster appMaster;
 
-        private ConcurrentMap<ContainerId, Container> containers;
-
-        public NMCallbackHandler(ApplicationMaster applicationMaster) {
-            this.applicationMaster = applicationMaster;
-            this.containers = new ConcurrentHashMap<ContainerId, Container>();
-        }
-
-        public void addContainer(ContainerId containerId, Container container) {
-            containers.putIfAbsent(containerId, container);
+        public NMCallbackHandler(ApplicationMaster appMaster) {
+            this.appMaster = appMaster;
         }
 
         @Override
@@ -344,10 +344,21 @@ public final class ApplicationMaster {
             if (logger.isDebugEnabled()) {
                 logger.debug("Succeeded to start Container " + containerId);
             }
-            Container container = containers.get(containerId);
+            final Container container =
+                    appMaster.allocContainers.get(containerId);
             if (container != null) {
-                applicationMaster.nmClientAsync.getContainerStatusAsync(
-                        containerId, container.getNodeId());
+                appMaster.nmClientAsync.getContainerStatusAsync(containerId, container.getNodeId());
+
+                // TODO: Need to check heartbeats from a launched MIX server
+                // TODO: Need to fill a port number from a piggy-bagged
+                // message in the heartbeats
+                activeMixServers.put(containerId,
+                        NodeId.newInstance(container.getNodeId().getHost(), 11212));
+            } else {
+                // Ignore containers we know nothing about - probably
+                // from a previous attempt.
+                logger.info("Ignoring completed status of " + containerId
+                        + "; unknown container (probably launched by previous attempt)");
             }
         }
 
@@ -363,15 +374,15 @@ public final class ApplicationMaster {
             if (logger.isDebugEnabled()) {
                 logger.debug("Succeeded to stop Container " + containerId);
             }
-            containers.remove(containerId);
+            appMaster.allocContainers.remove(containerId);
         }
 
         @Override
         public void onStartContainerError(ContainerId containerId, Throwable throwable) {
             logger.error("Failed to start Container " + containerId);
-            containers.remove(containerId);
-            applicationMaster.numCompletedContainers.incrementAndGet();
-            applicationMaster.numFailedContainers.incrementAndGet();
+            appMaster.allocContainers.remove(containerId);
+            appMaster.numCompletedContainers.incrementAndGet();
+            appMaster.numFailedContainers.incrementAndGet();
         }
 
         @Override
@@ -382,7 +393,7 @@ public final class ApplicationMaster {
         @Override
         public void onStopContainerError(ContainerId containerId, Throwable throwable) {
             logger.error("Failed to stop Container " + containerId);
-            containers.remove(containerId);
+            appMaster.allocContainers.remove(containerId);
         }
     }
 
@@ -391,15 +402,8 @@ public final class ApplicationMaster {
             Thread.sleep(60 * 1000L);
         }
 
-        // Join all launched threads
-        for (Thread launchThread : launchThreads) {
-            try {
-                launchThread.join(10000);
-            } catch (InterruptedException e) {
-                logger.info("Exception thrown in thread join: " + e.getMessage());
-                e.printStackTrace();
-          }
-        }
+        // First, shutdown the executor for launchers
+        containerExecutor.shutdown();
 
         // When the application completes, it should stop all
         // running containers.
@@ -510,8 +514,6 @@ public final class ApplicationMaster {
             ContainerLaunchContext ctx = ContainerLaunchContext
                     .newInstance(localResources, env, commands, null, null, null);
             nmClientAsync.startContainerAsync(container, ctx);
-
-            containerListener.addContainer(container.getId(), container);
         }
     }
 }
