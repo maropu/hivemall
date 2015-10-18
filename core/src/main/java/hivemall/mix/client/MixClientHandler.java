@@ -45,5 +45,4 @@ public final class MixClientHandler extends SimpleChannelInboundHandler<MixMessa
         float covar = msg.getCovariance();
         model.set(feature, weight, covar, clock);
     }
-
 }

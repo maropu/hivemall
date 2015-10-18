@@ -232,8 +232,8 @@ public final class MixServerRunner {
             }
 
             env.put("CLASSPATH", classPathEnv.toString());
-            env.put(YarnUtils.MIXSERVER_RESOURCE_LOCATION, sharedDir.toString());
-            env.put(YarnUtils.MIXSERVER_CONTAINER_APP, mixServJar.getName());
+            env.put(MixEnv.MIXSERVER_RESOURCE_LOCATION, sharedDir.toString());
+            env.put(MixEnv.MIXSERVER_CONTAINER_APP, mixServJar.getName());
         }
 
         // Set the necessary command to execute AM

@@ -18,6 +18,16 @@
  */
 package hivemall.mix.yarn;
 
+import hivemall.mix.network.HeartbeatReceiver;
+import hivemall.mix.network.HeartbeatReceiver.HeartbeatInitializer;
+import hivemall.utils.collections.TimestampedValue;
+import io.netty.bootstrap.ServerBootstrap;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.handler.logging.LoggingHandler;
 import org.apache.commons.cli.*;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -38,10 +48,13 @@ import org.apache.hadoop.yarn.util.ConverterUtils;
 import org.apache.htrace.commons.logging.Log;
 import org.apache.htrace.commons.logging.LogFactory;
 import org.apache.log4j.LogManager;
+import io.netty.handler.logging.LogLevel;
 
+import javax.annotation.concurrent.ThreadSafe;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.Map.Entry;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -70,17 +83,25 @@ public final class ApplicationMaster {
     private int containerVCores;
     private int numContainers;
     private int requestPriority;
-    private int numRetryForFailedConainers;
+    private int numRetryForFailedContainers;
+
+    // List of allocated containers and alive MIX servers
+    private final ConcurrentMap<ContainerId, Container> allocContainers =
+            new ConcurrentHashMap<ContainerId, Container>();
+    private final ConcurrentMap<ContainerId, TimestampedValue<NodeId>> activeMixServers =
+            new ConcurrentHashMap<ContainerId, TimestampedValue<NodeId>>();
 
     // Thread pool for container launchers
     private final ExecutorService containerExecutor =
             Executors.newFixedThreadPool(1);
 
-    // List of allocated containers and alive MIX servers
-    private ConcurrentMap<ContainerId, Container> allocContainers =
-            new ConcurrentHashMap<ContainerId, Container>();
-    private ConcurrentMap<ContainerId, NodeId> activeMixServers =
-            new ConcurrentHashMap<ContainerId, NodeId>();
+    // Check if MIX servers keep alive
+    private final ScheduledExecutorService monitorContainerExecutor =
+            Executors.newScheduledThreadPool(1);
+
+    // Group for report receivers from MIX servers
+    private final EventLoopGroup recvBoss = new NioEventLoopGroup(1);
+    private final EventLoopGroup recvWorkers = new NioEventLoopGroup(1);
 
     // Trackers for container status
     private final AtomicInteger numAllocatedContainers = new AtomicInteger();
@@ -118,9 +139,9 @@ public final class ApplicationMaster {
         this.containerMainClass = "hivemall.mix.server.MixServer";
         this.conf = new YarnConfiguration();
         this.opts = new Options();
-        opts.addOption("num_containers", true, "# of containers for mix servers");
-        opts.addOption("container_memory", true, "Amount of memory in MB to be requested to run a mix server");
-        opts.addOption("container_vcores", true, "Amount of virtual cores to be requested to run a mix server");
+        opts.addOption("num_containers", true, "# of containers for MIX servers");
+        opts.addOption("container_memory", true, "Amount of memory in MB to be requested to run a MIX server");
+        opts.addOption("container_vcores", true, "Amount of virtual cores to be requested to run a MIX server");
         opts.addOption("priority", true, "Application Priority [Default: 0]");
         opts.addOption("num_retries", true, "# of retries for failed containers [Default: 32]");
         opts.addOption("help", false, "Print usage");
@@ -146,15 +167,15 @@ public final class ApplicationMaster {
         // Get variables from envs
         appAttemptID = ConverterUtils.toContainerId(getEnv(Environment.CONTAINER_ID.name()))
                 .getApplicationAttemptId();
-        sharedDir = getEnv(YarnUtils.MIXSERVER_RESOURCE_LOCATION);
-        mixServJar = getEnv(YarnUtils.MIXSERVER_CONTAINER_APP);
+        sharedDir = getEnv(MixEnv.MIXSERVER_RESOURCE_LOCATION);
+        mixServJar = getEnv(MixEnv.MIXSERVER_CONTAINER_APP);
 
         // Get variables from arguments
         containerVCores = Integer.parseInt(cliParser.getOptionValue("container_vcores", "1"));
         containerMemory = Integer.parseInt(cliParser.getOptionValue("container_memory", "10"));
         numContainers = Integer.parseInt(cliParser.getOptionValue("num_containers", "1"));
         requestPriority = Integer.parseInt(cliParser.getOptionValue("priority", "0"));
-        numRetryForFailedConainers = Integer.parseInt(cliParser.getOptionValue("num_retries", "32"));
+        numRetryForFailedContainers = Integer.parseInt(cliParser.getOptionValue("num_retries", "32"));
         if (numContainers == 0) {
             throw new IllegalArgumentException(
                     "Cannot run distributed shell with no containers");
@@ -218,11 +239,82 @@ public final class ApplicationMaster {
             containerMemory = maxMem;
         }
 
+        // Accept incomming heartbeats from launched MIX servers
+        startHeartbeatReceiver();
+
+        // Start scheduled threads to check if MIX servers keep alive
+        monitorContainerExecutor.scheduleAtFixedRate(
+                new MonitorContainerRunnable(amRMClientAsync, activeMixServers, allocContainers),
+                MixEnv.MIXSERVER_HEARTBEAT_INTERVAL + 30L,
+                MixEnv.MIXSERVER_HEARTBEAT_INTERVAL,
+                TimeUnit.SECONDS);
+
         for (int i = 0; i < numContainers; i++) {
             AMRMClient.ContainerRequest containerAsk = setupContainerAskForRM();
             amRMClientAsync.addContainerRequest(containerAsk);
         }
         numRequestedContainers.set(numContainers);
+    }
+
+    private void startHeartbeatReceiver() throws InterruptedException {
+        ServerBootstrap b = new ServerBootstrap();
+        b.option(ChannelOption.SO_KEEPALIVE, true);
+        b.group(recvBoss, recvWorkers);
+        b.channel(NioServerSocketChannel.class);
+        b.handler(new LoggingHandler(LogLevel.INFO));
+        b.childHandler(new HeartbeatInitializer(new HeartbeatReceiver(activeMixServers)));
+
+        // Bind and start to accept incoming connections
+        ChannelFuture f = b.bind(MixEnv.REPORT_RECEIVER_PORT).sync();
+
+        // Wait until the server socket is closed.
+        // In this example, this does not happen, but you can do that to gracefully
+        // shut down your server.
+        f.channel().closeFuture().sync();
+    }
+
+    @ThreadSafe
+    public final class MonitorContainerRunnable implements Runnable {
+
+        private AMRMClientAsync amRMClientAsync;
+        private final ConcurrentMap<ContainerId, TimestampedValue<NodeId>> activeMixServers;
+        private final ConcurrentMap<ContainerId, Container> allocContainers;
+
+        public MonitorContainerRunnable(
+                AMRMClientAsync amRMClientAsync,
+                ConcurrentMap<ContainerId, TimestampedValue<NodeId>> activeMixServers,
+                ConcurrentMap<ContainerId, Container> allocContainers) {
+            this.amRMClientAsync = amRMClientAsync;
+            this.allocContainers = allocContainers;
+            this.activeMixServers = activeMixServers;
+        }
+
+        @Override
+        public void run() {
+            final Set<Entry<ContainerId, TimestampedValue<NodeId>>> set =
+                    activeMixServers.entrySet();
+            final Iterator<Entry<ContainerId, TimestampedValue<NodeId>>> itor = set.iterator();
+            while (itor.hasNext()) {
+                Entry<ContainerId, TimestampedValue<NodeId>> e = itor.next();
+                TimestampedValue<NodeId> value = e.getValue();
+                long elapsedTime = System.currentTimeMillis() - value.getTimestamp();
+                // Wait at most two-times intervals for heartbeats
+                if (elapsedTime > MixEnv.MIXSERVER_HEARTBEAT_INTERVAL * 2) {
+                    // If expired, restart the MIX server
+                    ContainerId id = e.getKey();
+                    NodeId node = value.getValue();
+                    Container container = allocContainers.get(id);
+                    if (container != null) {
+                        // TODO: Restart the failed MIX server.
+                        // amRMClientAsync.releaseAssignedContainer(id);
+                        itor.remove();
+                    } else {
+                        logger.warn(node + " failed though, " + id
+                                + " already has been removed from assigned containers");
+                    }
+                }
+            }
+        }
     }
 
     private class RMCallbackHandler implements AMRMClientAsync.CallbackHandler {
@@ -270,7 +362,7 @@ public final class ApplicationMaster {
 
             // Ask for more containers if any failed
             int askCount = numContainers - numRequestedContainers.get();
-            if (retryRequest++ < numRetryForFailedConainers && askCount > 0) {
+            if (retryRequest++ < numRetryForFailedContainers && askCount > 0) {
                 logger.info("Retry " + askCount + " requests for failed containers");
                 for (int i = 0; i < askCount; ++i) {
                     ContainerRequest containerAsk = setupContainerAskForRM();
@@ -290,7 +382,7 @@ public final class ApplicationMaster {
                     + allocatedContainers.size());
             numAllocatedContainers.addAndGet(allocatedContainers.size());
             for (Container container: allocatedContainers) {
-                logger.info("Launching a mix server on a new container: "
+                logger.info("Launching a MIX server on a new container: "
                         + "containerId=" + container.getId()
                         + ", containerNode=" + container.getNodeId().getHost()
                             + ":" + container.getNodeId().getPort()
@@ -306,7 +398,6 @@ public final class ApplicationMaster {
                 // may not be allocated at one go.
                 containerExecutor.submit(
                         createLaunchContainerThread(container));
-
             }
         }
 
@@ -348,12 +439,12 @@ public final class ApplicationMaster {
                     appMaster.allocContainers.get(containerId);
             if (container != null) {
                 appMaster.nmClientAsync.getContainerStatusAsync(containerId, container.getNodeId());
-
-                // TODO: Need to check heartbeats from a launched MIX server
-                // TODO: Need to fill a port number from a piggy-bagged
-                // message in the heartbeats
+                // Create an invalid entry for the MIX server that is not launched yet and
+                // the first heartbeat message makes this entry valid
+                // in HeartbeatHandler#channelRead0.
+                final NodeId node = NodeId.newInstance(container.getNodeId().getHost(), -1);
                 activeMixServers.put(containerId,
-                        NodeId.newInstance(container.getNodeId().getHost(), 11212));
+                        new TimestampedValue<NodeId>(node));
             } else {
                 // Ignore containers we know nothing about - probably
                 // from a previous attempt.
@@ -409,6 +500,10 @@ public final class ApplicationMaster {
         // running containers.
         nmClientAsync.stop();
 
+        // Stop report receivers
+        recvWorkers.shutdownGracefully();
+        recvBoss.shutdownGracefully();
+
         // When the application completes, it should send a finish
         // application signal to the RM.
         FinalApplicationStatus appStatus;
@@ -447,18 +542,16 @@ public final class ApplicationMaster {
     }
 
     private Thread createLaunchContainerThread(Container allocatedContainer) {
-        return new Thread(new LaunchContainerRunnable(allocatedContainer, containerListener));
+        return new Thread(new LaunchContainerRunnable(allocatedContainer));
     }
 
-    // Thread to launch the container that will execute a mix server
+    // Thread to launch the container that will execute a MIX server
     private class LaunchContainerRunnable implements Runnable {
 
         private final Container container;
-        private final NMCallbackHandler containerListener;
 
-        public LaunchContainerRunnable(Container container, NMCallbackHandler containerListener) {
+        public LaunchContainerRunnable(Container container) {
             this.container = container;
-            this.containerListener = containerListener;
         }
 
         @Override

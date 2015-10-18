@@ -33,12 +33,6 @@ import java.util.Map;
 
 public final class YarnUtils {
 
-    // Environment key name pointing to a cluster-wide directory
-    static final String MIXSERVER_RESOURCE_LOCATION = "MIXSERVER_RESOURCE_LOCATION";
-
-    // Environment key name denoting a jar name for containers
-    static final String MIXSERVER_CONTAINER_APP = "MIXSERVER_CONTAINER_APP";
-
     static void addClassPath(String path, StringBuilder classPaths) {
         classPaths.append(path);
         classPaths.append(ApplicationConstants.CLASS_PATH_SEPARATOR);
