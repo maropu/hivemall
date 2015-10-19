@@ -18,7 +18,7 @@
  */
 package hivemall.mix.yarn;
 
-import hivemall.mix.MixServer;
+// import hivemall.mix.MixServer;
 import hivemall.mix.launcher.WorkerCommandBuilder;
 import hivemall.mix.network.HeartbeatHandler.HeartbeatReceiver;
 import hivemall.mix.network.HeartbeatHandler.HeartbeatInitializer;
@@ -26,7 +26,6 @@ import hivemall.mix.network.MixServerRequestHandler.MixServerRequestReceiver;
 import hivemall.mix.network.MixServerRequestHandler.MixServerRequestInitializer;
 import hivemall.utils.collections.TimestampedValue;
 import io.netty.bootstrap.ServerBootstrap;
-import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
@@ -285,14 +284,8 @@ public final class ApplicationMaster {
         b.channel(NioServerSocketChannel.class);
         b.handler(new LoggingHandler(LogLevel.INFO));
         b.childHandler(initializer);
-
         // Bind and start to accept incoming connections
-        ChannelFuture f = b.bind(port).sync();
-
-        // Wait until the server socket is closed.
-        // In this example, this does not happen, but you can do that to gracefully
-        // shut down your server.
-        f.channel().closeFuture().sync();
+        b.bind(port).sync();
     }
 
     @ThreadSafe
@@ -459,9 +452,7 @@ public final class ApplicationMaster {
 
         @Override
         public void onContainerStarted(ContainerId containerId, Map<String, ByteBuffer> map) {
-            if (logger.isDebugEnabled()) {
-                logger.debug("Succeeded to start Container " + containerId);
-            }
+            logger.info("Succeeded to start Container " + containerId);
             final Container container =
                     appMaster.allocContainers.get(containerId);
             if (container != null) {
@@ -482,16 +473,12 @@ public final class ApplicationMaster {
 
         @Override
         public void onContainerStatusReceived(ContainerId containerId, ContainerStatus status) {
-            if (logger.isDebugEnabled()) {
-                logger.debug("Container Status: id=" + containerId + ", status=" + status);
-            }
+            logger.info("Container Status: id=" + containerId + ", status=" + status);
         }
 
         @Override
         public void onContainerStopped(ContainerId containerId) {
-            if (logger.isDebugEnabled()) {
-                logger.debug("Succeeded to stop Container " + containerId);
-            }
+            logger.info("Succeeded to stop Container " + containerId);
             appMaster.allocContainers.remove(containerId);
             appMaster.activeMixServers.remove(containerId);
         }
@@ -602,12 +589,13 @@ public final class ApplicationMaster {
 
             // Create a command executed in NM
             final WorkerCommandBuilder cmdBuilder = new WorkerCommandBuilder(
-                    MixServer.class, YarnUtils.getClassPaths(""), containerMemory, vargs, null);
+                    "hivemall.mix.server.MixServer", YarnUtils.getClassPaths(""), containerMemory, vargs, null);
+                    // MixServer.class, YarnUtils.getClassPaths(""), containerMemory, vargs, null);
 
             // Set a yarn-specific java home
             cmdBuilder.setJavaHome(Environment.JAVA_HOME.$$());
 
-            logger.debug("Build an executable command for containers: " + cmdBuilder);
+            logger.info("Build an executable command for containers: " + cmdBuilder);
 
             try {
                 this.cmd = cmdBuilder.buildCommand();

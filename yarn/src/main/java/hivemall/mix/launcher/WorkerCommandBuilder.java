@@ -27,7 +27,7 @@ import java.util.regex.Pattern;
 
 public final class WorkerCommandBuilder {
 
-    private final Class<?> mainClass;
+    private final String mainClass;
     private final String extraClassPath;
     private final int memoryMb;
     private final List<String> arguments;
@@ -37,6 +37,12 @@ public final class WorkerCommandBuilder {
 
     public WorkerCommandBuilder(
             Class<?> mainClass,  String extraClassPath, int memoryMb,
+            List<String> arguments, List<String> javaOps) {
+        this(mainClass.getCanonicalName(), extraClassPath, memoryMb, arguments, javaOps);
+    }
+
+    public WorkerCommandBuilder(
+            String mainClass,  String extraClassPath, int memoryMb,
             List<String> arguments, List<String> javaOps) {
         this.mainClass = mainClass;
         this.extraClassPath = extraClassPath;
@@ -63,7 +69,7 @@ public final class WorkerCommandBuilder {
         command.add(join(File.pathSeparator, buildClassPath(extraClassPath)));
         command.addAll(Arrays.asList("-Xms" + memoryMb + "m", "-Xmx" + memoryMb + "m"));
         if (javaOps != null) command.addAll(javaOps);
-        command.add(mainClass.getCanonicalName());
+        command.add(mainClass);
         if (arguments != null) command.addAll(arguments);
         return command;
     }

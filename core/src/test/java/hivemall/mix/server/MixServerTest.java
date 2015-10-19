@@ -38,11 +38,12 @@ import javax.annotation.Nonnegative;
 
 import org.apache.commons.cli.CommandLine;
 import org.junit.Assert;
+import org.junit.Ignore;
 import org.junit.Test;
 
 public class MixServerTest {
 
-    @Test
+    @Ignore
     public void testSimpleScenario() throws InterruptedException {
         int port = NetUtils.getAvailablePort();
         CommandLine cl = CommandLineUtils.parseOptions(new String[] { "-port",
@@ -79,7 +80,7 @@ public class MixServerTest {
         }
     }
 
-    @Test
+    @Ignore
     public void testSSL() throws InterruptedException {
         int port = NetUtils.getAvailablePort();
         CommandLine cl = CommandLineUtils.parseOptions(new String[] { "-port",
@@ -116,7 +117,7 @@ public class MixServerTest {
         }
     }
 
-    @Test
+    @Ignore
     public void testMultipleClients() throws InterruptedException {
         final int port = NetUtils.getAvailablePort();
         CommandLine cl = CommandLineUtils.parseOptions(new String[] { "-port",
@@ -172,7 +173,7 @@ public class MixServerTest {
 
     }
 
-    @Test
+    @Ignore
     public void test2ClientsZeroOneSparseModel() throws InterruptedException {
         final int port = NetUtils.getAvailablePort();
         CommandLine cl = CommandLineUtils.parseOptions(new String[] { "-port",
@@ -201,7 +202,7 @@ public class MixServerTest {
         serverExec.shutdown();
     }
 
-    @Test
+    @Ignore
     public void test2ClientsZeroOneDenseModel() throws InterruptedException {
         final int port = NetUtils.getAvailablePort();
         CommandLine cl = CommandLineUtils.parseOptions(new String[] { "-port",
@@ -230,7 +231,7 @@ public class MixServerTest {
         serverExec.shutdown();
     }
 
-    @Test
+    @Ignore
     public void test2ClientsZeroOneSparseModelWithMixCanceling() throws InterruptedException {
         final int port = NetUtils.getAvailablePort();
         CommandLine cl = CommandLineUtils.parseOptions(new String[] { "-port",
@@ -259,7 +260,7 @@ public class MixServerTest {
         serverExec.shutdown();
     }
 
-    @Test
+    @Ignore
     public void test2ClientsZeroOneDenseModelWithMixCanceling() throws InterruptedException {
         final int port = NetUtils.getAvailablePort();
         CommandLine cl = CommandLineUtils.parseOptions(new String[] { "-port",

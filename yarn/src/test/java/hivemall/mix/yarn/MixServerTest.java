@@ -22,6 +22,9 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.util.JarFinder;
+import org.apache.hadoop.yarn.api.records.ApplicationReport;
+import org.apache.hadoop.yarn.api.records.YarnApplicationState;
+import org.apache.hadoop.yarn.client.api.YarnClient;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.server.MiniYARNCluster;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.CapacityScheduler;
@@ -29,6 +32,10 @@ import org.junit.*;
 
 import java.io.*;
 import java.net.URL;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MixServerTest {
@@ -98,39 +105,60 @@ public class MixServerTest {
         }
     }
 
-    @Ignore
-    // @Test(timeout=90000)
+    @Test(timeout=90000)
     public void testSimpleScenario() throws Exception {
         final String[] args = {
             "--jar", appMasterJar,
             "--num_containers", "1",
             "--master_memory", "128",
             "--master_vcores", "1",
-            "--container_memory", "512",
+            "--container_memory", "128",
             "--container_vcores", "1"
         };
 
-        final MixServerRunner runner = new MixServerRunner(new Configuration(yarnCluster.getConfig()));
-        boolean initSuccess = runner.init(args);
+        final MixServerRunner mixClusterRunner =
+                new MixServerRunner(new Configuration(yarnCluster.getConfig()));
+        boolean initSuccess = mixClusterRunner.init(args);
         Assert.assertTrue(initSuccess);
 
         final AtomicBoolean result = new AtomicBoolean(false);
-        Thread mixCluster = new Thread() {
-
+        ExecutorService mixExec = Executors.newSingleThreadExecutor();
+        Future<?> mixCluster = mixExec.submit(new Runnable() {
             @Override
             public void run() {
                 try {
-                    result.set(runner.run());
+                    result.set(mixClusterRunner.run());
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
             }
-        };
+        });
 
-        mixCluster.start();
+        // Check if ApplicationMaster works correctly
+        YarnClient yarnClient = YarnClient.createYarnClient();
 
-        // TODO: Do some tests...
+        yarnClient.init(new Configuration(yarnCluster.getConfig()));
+        yarnClient.start();
 
-        mixCluster.join();
+        while(true) {
+            List<ApplicationReport> apps = yarnClient.getApplications();
+            if (apps.size() == 0) {
+                Thread.sleep(500L);
+                continue;
+            }
+            Assert.assertEquals(1, apps.size());
+            ApplicationReport appReport = apps.get(0);
+            if(appReport.getHost().equals("N/A")) {
+                Thread.sleep(100L);
+                continue;
+            }
+            Assert.assertTrue(YarnApplicationState.RUNNING == appReport.getYarnApplicationState());
+            break;
+        }
+
+        // mixClusterRunner.forceKillApplication();
+        mixCluster.get();
+        mixExec.shutdown();
+        // Assert.assertTrue(result.get());
     }
 }

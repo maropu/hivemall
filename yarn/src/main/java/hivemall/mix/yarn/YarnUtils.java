@@ -40,7 +40,7 @@ public final class YarnUtils {
         YarnUtils.addClassPath(Environment.CLASSPATH.$$(), classPaths);
         YarnUtils.addClassPath("./*", classPaths);
         YarnUtils.addClassPath("./log4j.properties", classPaths);
-        YarnUtils.addClassPath(appClassPath, classPaths);
+        // YarnUtils.addClassPath(appClassPath, classPaths);
         return classPaths.toString();
     }
 
