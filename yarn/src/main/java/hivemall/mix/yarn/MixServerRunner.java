@@ -18,6 +18,7 @@
  */
 package hivemall.mix.yarn;
 
+import hivemall.mix.launcher.WorkerCommandBuilder;
 import org.apache.commons.cli.*;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -203,10 +204,10 @@ public final class MixServerRunner {
         // Local resources (e.g., jar and local files) for AM
         Map<String, LocalResource> localResources = new HashMap<String, LocalResource>();
 
-        final FileSystem fs = FileSystem.get(conf);
-        final Path sharedDir = createTempDir(fs, appId);
-
         // Copy the local stuffs to the filesystem
+        FileSystem fs = FileSystem.get(conf);
+        Path sharedDir = createTempDir(fs, appId);
+
         YarnUtils.copyFromLocalFile(fs, appMasterJar,
                 new Path(sharedDir, "appmaster.jar"), localResources);
         YarnUtils.copyFromLocalFile(fs, log4jPropFile,
@@ -217,52 +218,43 @@ public final class MixServerRunner {
         // Set the env variables to be setup in the env
         // where AM will be run.
         Map<String, String> env = new HashMap<String, String>();
-        {
-            StringBuilder classPathEnv = new StringBuilder();
 
-            YarnUtils.addClassPath(Environment.CLASSPATH.$$(), classPathEnv);
-            YarnUtils.addClassPath("./*", classPathEnv);
-            YarnUtils.addClassPath("./log4j.properties", classPathEnv);
-            YarnUtils.addClassPath(System.getProperty("java.class.path"), classPathEnv);
-            final String[] yarnClassPath = conf.getStrings(
-                    YarnConfiguration.YARN_APPLICATION_CLASSPATH,
-                    YarnConfiguration.DEFAULT_YARN_CROSS_PLATFORM_APPLICATION_CLASSPATH);
-            for (String c : yarnClassPath) {
-                YarnUtils.addClassPath(c.trim(), classPathEnv);
-            }
+        env.put(MixEnv.MIXSERVER_RESOURCE_LOCATION, sharedDir.toString());
+        env.put(MixEnv.MIXSERVER_CONTAINER_APP, mixServJar.getName());
 
-            env.put("CLASSPATH", classPathEnv.toString());
-            env.put(MixEnv.MIXSERVER_RESOURCE_LOCATION, sharedDir.toString());
-            env.put(MixEnv.MIXSERVER_CONTAINER_APP, mixServJar.getName());
+        // Set yarn-specific classpaths
+        StringBuilder yarnAppClassPaths = new StringBuilder();
+
+        String[] yarnClassPath = conf.getStrings(
+                YarnConfiguration.YARN_APPLICATION_CLASSPATH,
+                YarnConfiguration.DEFAULT_YARN_CROSS_PLATFORM_APPLICATION_CLASSPATH);
+        for (String c : yarnClassPath) {
+            YarnUtils.addClassPath(c.trim(), yarnAppClassPaths);
         }
 
-        // Set the necessary command to execute AM
-        List<String> commands = new ArrayList<String>();
-        {
-            Vector<CharSequence> vargs = new Vector<CharSequence>(30);
+        // Set arguments
+        List<String> vargs = new ArrayList<String>();
 
-            vargs.add(Environment.JAVA_HOME.$$() + "/bin/java");
-            vargs.add("-Xmx" + amMemory + "m");
-            vargs.add(ApplicationMaster.class.getCanonicalName());
-            vargs.add("--container_memory " + String.valueOf(containerMemory));
-            vargs.add("--container_vcores " + String.valueOf(containerVCores));
-            vargs.add("--num_containers " + String.valueOf(numContainers));
-            vargs.add("1>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR + "/AppMaster.stdout");
-            vargs.add("2>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR + "/AppMaster.stderr");
+        vargs.add("--container_memory " + String.valueOf(containerMemory));
+        vargs.add("--container_vcores " + String.valueOf(containerVCores));
+        vargs.add("--num_containers " + String.valueOf(numContainers));
+        vargs.add("1>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR + "/AppMaster.stdout");
+        vargs.add("2>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR + "/AppMaster.stderr");
 
-            StringBuilder command = new StringBuilder();
-            for (CharSequence str : vargs) {
-                command.append(str).append(" ");
-            }
+        // Create a command executed in NM
+        WorkerCommandBuilder cmdBuilder = new WorkerCommandBuilder(
+                ApplicationMaster.class, YarnUtils.getClassPaths(yarnAppClassPaths.toString()),
+                amMemory, vargs, null);
 
-            final String commandStr = command.toString();
-            commands.add(commandStr);
-            logger.info("Executed command for AM: " + commandStr);
-        }
+        // Set a yarn-specific java home
+        cmdBuilder.setJavaHome(Environment.JAVA_HOME.$$());
+
+        logger.debug("Build an executable command for AM: " + cmdBuilder);
 
         // Set up the container launch context for AM
         ContainerLaunchContext amContainer =
-                ContainerLaunchContext.newInstance(localResources, env, commands, null, null, null);
+                ContainerLaunchContext.newInstance(
+                        localResources, env, cmdBuilder.buildCommand(), null, null, null);
 
         // Set up resource type requirements
         Resource capability = Resource.newInstance(amMemory, amVCores);

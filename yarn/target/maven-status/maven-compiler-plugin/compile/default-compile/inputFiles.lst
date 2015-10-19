@@ -1,8 +1,0 @@
-/Users/maropu/IdeaProjects/hivemall/hivemall-master/yarn/src/main/java/hivemall/mix/yarn/ApplicationMaster.java
-/Users/maropu/IdeaProjects/hivemall/hivemall-master/yarn/src/main/java/hivemall/mix/network/Heartbeat.java
-/Users/maropu/IdeaProjects/hivemall/hivemall-master/yarn/src/main/java/hivemall/mix/network/HeartbeatReceiver.java
-/Users/maropu/IdeaProjects/hivemall/hivemall-master/yarn/src/main/java/hivemall/utils/collections/TimestampedValue.java
-/Users/maropu/IdeaProjects/hivemall/hivemall-master/yarn/src/main/java/hivemall/mix/yarn/MixServerRunner.java
-/Users/maropu/IdeaProjects/hivemall/hivemall-master/yarn/src/main/java/hivemall/mix/yarn/Log4jPropertyHelper.java
-/Users/maropu/IdeaProjects/hivemall/hivemall-master/yarn/src/main/java/hivemall/mix/yarn/MixEnv.java
-/Users/maropu/IdeaProjects/hivemall/hivemall-master/yarn/src/main/java/hivemall/mix/yarn/YarnUtils.java

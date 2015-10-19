@@ -28,7 +28,10 @@ import hivemall.mix.store.SessionStore;
 import io.netty.channel.ChannelHandler.Sharable;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 
+import java.io.IOException;
 import java.util.concurrent.ConcurrentMap;
 
 import javax.annotation.Nonnegative;
@@ -36,6 +39,8 @@ import javax.annotation.Nonnull;
 
 @Sharable
 public final class MixServerHandler extends SimpleChannelInboundHandler<MixMessage> {
+
+    private static final Log logger = LogFactory.getLog(MixServerHandler.class);
 
     @Nonnull
     private final SessionStore sessionStore;
@@ -66,6 +71,16 @@ public final class MixServerHandler extends SimpleChannelInboundHandler<MixMessa
             }
             default:
                 throw new IllegalStateException("Unexpected event: " + event);
+        }
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        if (cause instanceof IOException) {
+            // Assume 'java.io.IOException: Connection reset by peer'
+            logger.info(cause);
+        } else {
+            super.exceptionCaught(ctx, cause);
         }
     }
 

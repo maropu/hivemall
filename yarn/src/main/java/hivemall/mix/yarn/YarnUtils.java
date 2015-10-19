@@ -22,6 +22,7 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.yarn.api.ApplicationConstants;
+import org.apache.hadoop.yarn.api.ApplicationConstants.Environment;
 import org.apache.hadoop.yarn.api.records.LocalResource;
 import org.apache.hadoop.yarn.api.records.LocalResourceType;
 import org.apache.hadoop.yarn.api.records.LocalResourceVisibility;
@@ -32,6 +33,16 @@ import java.io.IOException;
 import java.util.Map;
 
 public final class YarnUtils {
+
+    static String getClassPaths(String appClassPath) {
+        // Create application-specific classpaths
+        StringBuilder classPaths = new StringBuilder();
+        YarnUtils.addClassPath(Environment.CLASSPATH.$$(), classPaths);
+        YarnUtils.addClassPath("./*", classPaths);
+        YarnUtils.addClassPath("./log4j.properties", classPaths);
+        YarnUtils.addClassPath(appClassPath, classPaths);
+        return classPaths.toString();
+    }
 
     static void addClassPath(String path, StringBuilder classPaths) {
         classPaths.append(path);

@@ -18,6 +18,8 @@
  */
 package hivemall.mix.yarn;
 
+import hivemall.mix.MixServer;
+import hivemall.mix.launcher.WorkerCommandBuilder;
 import hivemall.mix.network.HeartbeatHandler.HeartbeatReceiver;
 import hivemall.mix.network.HeartbeatHandler.HeartbeatInitializer;
 import hivemall.mix.network.MixServerRequestHandler.MixServerRequestReceiver;
@@ -93,6 +95,9 @@ public final class ApplicationMaster {
             new ConcurrentHashMap<ContainerId, Container>();
     private final ConcurrentMap<ContainerId, TimestampedValue<NodeId>> activeMixServers =
             new ConcurrentHashMap<ContainerId, TimestampedValue<NodeId>>();
+
+    // Info. to launch containers
+    private ContainerLaunchInfo cmdInfo = new ContainerLaunchInfo();
 
     // Thread pool for container launchers
     private final ExecutorService containerExecutor =
@@ -190,6 +195,9 @@ public final class ApplicationMaster {
         } catch (Exception e) {
             logger.warn("Can not set up custom log4j properties. " + e);
         }
+
+        // Build an executable command for containers
+        cmdInfo.init();
 
         logger.info("Application master for "
                 + "appId:" + appAttemptID.getApplicationId().getId()
@@ -416,7 +424,7 @@ public final class ApplicationMaster {
                 // the main thread unblocked as all containers
                 // may not be allocated at one go.
                 containerExecutor.submit(
-                        new LaunchContainerRunnable(container));
+                        new LaunchContainerRunnable(container, cmdInfo));
             }
         }
 
@@ -564,21 +572,19 @@ public final class ApplicationMaster {
         return request;
     }
 
-    // Thread to launch the container that will execute a MIX server
-    private class LaunchContainerRunnable implements Runnable {
+    private class ContainerLaunchInfo {
 
-        private final Container container;
+        private Map<String, LocalResource> localResources = new HashMap<String, LocalResource>();
+        private List<String> cmd = null;
+        private boolean isInitialized = false;
 
-        public LaunchContainerRunnable(Container container) {
-            this.container = container;
-        }
+        public void init() {
+            // If already initialized, return
+            if (isInitialized)
+                return;
 
-        @Override
-        public void run() {
             // Set local resources (e.g., local files or archives)
             // for the allocated container.
-            Map<String, LocalResource> localResources = new HashMap<String, LocalResource>();
-
             try {
                 final FileSystem fs = FileSystem.get(conf);
                 final Path mixServJarDst = new Path(sharedDir, mixServJar);
@@ -588,44 +594,49 @@ public final class ApplicationMaster {
                 e.printStackTrace();
             }
 
-            // Set the env variables to be setup in the env
-            // where the container will be run.
-            Map<String, String> env = new HashMap<String, String>();
-            {
-                StringBuilder classPathEnv = new StringBuilder();
-                YarnUtils.addClassPath(Environment.CLASSPATH.$$(), classPathEnv);
-                YarnUtils.addClassPath("./*", classPathEnv);
-                YarnUtils.addClassPath("./log4j.properties", classPathEnv);
-                YarnUtils.addClassPath(System.getProperty("java.class.path"), classPathEnv);
-                env.put("CLASSPATH", classPathEnv.toString());
+            // Set arguments
+            List<String> vargs = new ArrayList<String>();
+
+            vargs.add("1>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR + "/stdout");
+            vargs.add("2>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR + "/stderr");
+
+            // Create a command executed in NM
+            final WorkerCommandBuilder cmdBuilder = new WorkerCommandBuilder(
+                    MixServer.class, YarnUtils.getClassPaths(""), containerMemory, vargs, null);
+
+            // Set a yarn-specific java home
+            cmdBuilder.setJavaHome(Environment.JAVA_HOME.$$());
+
+            logger.debug("Build an executable command for containers: " + cmdBuilder);
+
+            try {
+                this.cmd = cmdBuilder.buildCommand();
+                isInitialized = true;
+            } catch (IOException e) {
+                e.printStackTrace();
             }
+        }
 
-            // Set the necessary command to execute AM
-            List<String> commands = new ArrayList<String>();
-            {
-                Vector<CharSequence> vargs = new Vector<CharSequence>(30);
+        public ContainerLaunchContext createContext() {
+            assert isInitialized;
+            return ContainerLaunchContext.newInstance(localResources, null, cmd, null, null, null);
+        }
+    }
 
-                vargs.add(Environment.JAVA_HOME.$$() + "/bin/java");
-                vargs.add("-Xms" + containerMemory + "m");
-                vargs.add("-Xmx" + containerMemory + "m");
-                vargs.add(containerMainClass);
-                vargs.add("1>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR + "/stdout");
-                vargs.add("2>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR + "/stderr");
+    // Thread to launch the container that will execute a MIX server
+    private class LaunchContainerRunnable implements Runnable {
 
-                StringBuilder command = new StringBuilder();
-                for (CharSequence str : vargs) {
-                    command.append(str).append(" ");
-                }
+        private final Container container;
+        private final ContainerLaunchInfo cmdInfo;
 
-                final String commandStr = command.toString();
-                commands.add(commandStr);
-                logger.info("Executed command for the container: " + commandStr);
-            }
+        public LaunchContainerRunnable(Container container, ContainerLaunchInfo cmdInfo) {
+            this.container = container;
+            this.cmdInfo = cmdInfo;
+        }
 
-            // Launch container by ContainerLaunchContext
-            ContainerLaunchContext ctx = ContainerLaunchContext
-                    .newInstance(localResources, env, commands, null, null, null);
-            nmClientAsync.startContainerAsync(container, ctx);
+        @Override
+        public void run() {
+            nmClientAsync.startContainerAsync(container, cmdInfo.createContext());
         }
     }
 }
