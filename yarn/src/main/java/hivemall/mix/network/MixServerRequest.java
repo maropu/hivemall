@@ -16,22 +16,28 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package hivemall.mix.yarn;
+package hivemall.mix.network;
 
-public class MixEnv {
+public class MixServerRequest {
 
-    // Default port number for resource requests
-    static final int RESOURCE_REQUEST_PORT = 11213;
+    private final int numRequest;
+    private final String allocatedURIs;
 
-    // Default port number for report receivers
-    static final int REPORT_RECEIVER_PORT = 11214;
+    public MixServerRequest(int numRequest) {
+        this.numRequest = numRequest;
+        this.allocatedURIs = null;
+    }
 
-    // Environment key name pointing to a cluster-wide directory
-    static final String MIXSERVER_RESOURCE_LOCATION = "MIXSERVER_RESOURCE_LOCATION";
+    public MixServerRequest(int numRequest, String URIs) {
+        this.numRequest = numRequest;
+        this.allocatedURIs = URIs;
+    }
 
-    // Environment key name denoting a jar name for containers
-    static final String MIXSERVER_CONTAINER_APP = "MIXSERVER_CONTAINER_APP";
+    public int getNumRequest() {
+        return numRequest;
+    }
 
-    // Interval between each MIX server's heartbeat to an application master
-    static final long MIXSERVER_HEARTBEAT_INTERVAL = 180L;
+    public String getAllocatedURIs() {
+        return allocatedURIs;
+    }
 }

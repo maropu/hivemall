@@ -18,11 +18,14 @@
  */
 package hivemall.mix.yarn;
 
-import hivemall.mix.network.HeartbeatReceiver;
-import hivemall.mix.network.HeartbeatReceiver.HeartbeatInitializer;
+import hivemall.mix.network.HeartbeatHandler.HeartbeatReceiver;
+import hivemall.mix.network.HeartbeatHandler.HeartbeatInitializer;
+import hivemall.mix.network.MixServerRequestHandler.MixServerRequestReceiver;
+import hivemall.mix.network.MixServerRequestHandler.MixServerRequestInitializer;
 import hivemall.utils.collections.TimestampedValue;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -99,9 +102,9 @@ public final class ApplicationMaster {
     private final ScheduledExecutorService monitorContainerExecutor =
             Executors.newScheduledThreadPool(1);
 
-    // Group for report receivers from MIX servers
-    private final EventLoopGroup recvBoss = new NioEventLoopGroup(1);
-    private final EventLoopGroup recvWorkers = new NioEventLoopGroup(1);
+    // Group for netty workers
+    private final Set<EventLoopGroup> nettyWorkers =
+            new HashSet<EventLoopGroup>();
 
     // Trackers for container status
     private final AtomicInteger numAllocatedContainers = new AtomicInteger();
@@ -239,8 +242,14 @@ public final class ApplicationMaster {
             containerMemory = maxMem;
         }
 
-        // Accept incomming heartbeats from launched MIX servers
-        startHeartbeatReceiver();
+        // Accept heartbeats from launched MIX servers
+        startNettyServer(new HeartbeatInitializer(new HeartbeatReceiver(activeMixServers)),
+                MixEnv.REPORT_RECEIVER_PORT);
+
+        // Accept resource requests from clients
+        startNettyServer(new MixServerRequestInitializer(
+                    new MixServerRequestReceiver(activeMixServers)),
+                MixEnv.RESOURCE_REQUEST_PORT);
 
         // Start scheduled threads to check if MIX servers keep alive
         monitorContainerExecutor.scheduleAtFixedRate(
@@ -256,16 +265,21 @@ public final class ApplicationMaster {
         numRequestedContainers.set(numContainers);
     }
 
-    private void startHeartbeatReceiver() throws InterruptedException {
+    private void startNettyServer(ChannelInitializer initializer, int port)
+            throws InterruptedException {
+        final EventLoopGroup boss = new NioEventLoopGroup(1);
+        final EventLoopGroup workers = new NioEventLoopGroup(1);
+        nettyWorkers.add(boss);
+        nettyWorkers.add(workers);
         ServerBootstrap b = new ServerBootstrap();
         b.option(ChannelOption.SO_KEEPALIVE, true);
-        b.group(recvBoss, recvWorkers);
+        b.group(boss, workers);
         b.channel(NioServerSocketChannel.class);
         b.handler(new LoggingHandler(LogLevel.INFO));
-        b.childHandler(new HeartbeatInitializer(new HeartbeatReceiver(activeMixServers)));
+        b.childHandler(initializer);
 
         // Bind and start to accept incoming connections
-        ChannelFuture f = b.bind(MixEnv.REPORT_RECEIVER_PORT).sync();
+        ChannelFuture f = b.bind(port).sync();
 
         // Wait until the server socket is closed.
         // In this example, this does not happen, but you can do that to gracefully
@@ -500,9 +514,10 @@ public final class ApplicationMaster {
         // running containers.
         nmClientAsync.stop();
 
-        // Stop report receivers
-        recvWorkers.shutdownGracefully();
-        recvBoss.shutdownGracefully();
+        // Stop all the netty workers
+        for (EventLoopGroup worker : nettyWorkers) {
+            worker.shutdownGracefully();
+        }
 
         // When the application completes, it should send a finish
         // application signal to the RM.

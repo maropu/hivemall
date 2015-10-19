@@ -32,22 +32,32 @@ import org.apache.hadoop.yarn.api.records.NodeId;
 import java.io.UnsupportedEncodingException;
 import java.util.concurrent.ConcurrentMap;
 
-public final class HeartbeatReceiver extends SimpleChannelInboundHandler<Heartbeat> {
+public final class HeartbeatHandler {
 
-    final ConcurrentMap<ContainerId, TimestampedValue<NodeId>> nodes;
+    public final static class HeartbeatReceiver extends SimpleChannelInboundHandler<Heartbeat> {
 
-    public HeartbeatReceiver(ConcurrentMap<ContainerId, TimestampedValue<NodeId>> nodes) {
-        this.nodes = nodes;
-    }
+        final ConcurrentMap<ContainerId, TimestampedValue<NodeId>> activeMixServers;
 
-    @Override
-    protected void channelRead0(ChannelHandlerContext ctx, Heartbeat msg) throws Exception {
-        final ContainerId containerId = ContainerId.fromString(msg.getConainerId());
-        final NodeId node = NodeId.newInstance(msg.getHost(), msg.getPort());
-        if (nodes.replace(containerId, new TimestampedValue<NodeId>(node)) == null) {
-            // If the value does not exist, the MIX server
-            // already has gone.
-            nodes.remove(containerId);
+        public HeartbeatReceiver(ConcurrentMap<ContainerId, TimestampedValue<NodeId>> nodes) {
+            this.activeMixServers = nodes;
+        }
+
+        @Override
+        protected void channelRead0(ChannelHandlerContext ctx, Heartbeat msg)
+                throws Exception {
+            final ContainerId containerId = ContainerId.fromString(msg.getConainerId());
+            final NodeId node = NodeId.newInstance(msg.getHost(), msg.getPort());
+            if (activeMixServers.replace(containerId, new TimestampedValue<NodeId>(node)) == null) {
+                // If the value does not exist, the MIX server
+                // already has gone.
+                activeMixServers.remove(containerId);
+            }
+        }
+
+        @Override
+        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause)
+                throws Exception {
+            super.exceptionCaught(ctx, cause);
         }
     }
 
@@ -78,9 +88,9 @@ public final class HeartbeatReceiver extends SimpleChannelInboundHandler<Heartbe
             if (frame == null) {
                 return null;
             }
-            final String containerId = readString(frame);
-            final String host = readString(frame);
-            final int port = frame.readInt();
+            String containerId = readString(frame);
+            String host = readString(frame);
+            int port = frame.readInt();
             return new Heartbeat(containerId, host, port);
         }
 
