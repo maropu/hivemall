@@ -320,7 +320,7 @@ public final class ApplicationMaster {
                     Container container = allocContainers.get(id);
                     if (container != null) {
                         // TODO: Restart the failed MIX server.
-                        // amRMClientAsync.releaseAssignedContainer(id);
+                        amRMClientAsync.releaseAssignedContainer(id);
                         itor.remove();
                     } else {
                         logger.warn(node + " failed though, " + id
@@ -340,24 +340,29 @@ public final class ApplicationMaster {
             logger.info("Got response from RM for container ask, completedCnt="
                     + completedContainers.size());
             for (ContainerStatus containerStatus : completedContainers) {
+                final ContainerId containerId = containerStatus.getContainerId();
+
                 logger.info(appAttemptID + " got container status for "
-                        + "containerID:" + containerStatus.getContainerId()
+                        + "containerID:" + containerId
                         + ", state:" + containerStatus.getState()
                         + ", exitStatus:" + containerStatus.getExitStatus()
                         + ", diagnostics:" + containerStatus.getDiagnostics());
+
 
                 // Non complete containers should not be here
                 assert containerStatus.getState() == ContainerState.COMPLETE;
 
                 // Ignore containers we know nothing about - probably
                 // from a previous attempt.
-                if (!allocContainers.containsKey(containerStatus.getContainerId())) {
-                    logger.warn("Ignoring completed status of " + containerStatus.getContainerId()
+                if (!allocContainers.containsKey(containerId)) {
+                    logger.warn("Ignoring completed status of " + containerId
                             + "; unknown container (probably launched by previous attempt)");
                     continue;
                 }
 
-                allocContainers.remove(containerStatus.getContainerId());
+                // Unregister the container
+                allocContainers.remove(containerId);
+                activeMixServers.remove(containerId);
 
                 // Increment counters for completed/failed containers
                 int exitStatus = containerStatus.getExitStatus();
@@ -411,7 +416,7 @@ public final class ApplicationMaster {
                 // the main thread unblocked as all containers
                 // may not be allocated at one go.
                 containerExecutor.submit(
-                        createLaunchContainerThread(container));
+                        new LaunchContainerRunnable(container));
             }
         }
 
@@ -480,12 +485,14 @@ public final class ApplicationMaster {
                 logger.debug("Succeeded to stop Container " + containerId);
             }
             appMaster.allocContainers.remove(containerId);
+            appMaster.activeMixServers.remove(containerId);
         }
 
         @Override
         public void onStartContainerError(ContainerId containerId, Throwable throwable) {
             logger.error("Failed to start Container " + containerId);
             appMaster.allocContainers.remove(containerId);
+            appMaster.activeMixServers.remove(containerId);
             appMaster.numCompletedContainers.incrementAndGet();
             appMaster.numFailedContainers.incrementAndGet();
         }
@@ -499,6 +506,7 @@ public final class ApplicationMaster {
         public void onStopContainerError(ContainerId containerId, Throwable throwable) {
             logger.error("Failed to stop Container " + containerId);
             appMaster.allocContainers.remove(containerId);
+            appMaster.activeMixServers.remove(containerId);
         }
     }
 
@@ -554,10 +562,6 @@ public final class ApplicationMaster {
         ContainerRequest request = new ContainerRequest(capability, null, null, pri);
         logger.info("Requested container ask: " + request.toString());
         return request;
-    }
-
-    private Thread createLaunchContainerThread(Container allocatedContainer) {
-        return new Thread(new LaunchContainerRunnable(allocatedContainer));
     }
 
     // Thread to launch the container that will execute a MIX server
