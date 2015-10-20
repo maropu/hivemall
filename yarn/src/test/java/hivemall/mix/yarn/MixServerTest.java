@@ -18,6 +18,13 @@
  */
 package hivemall.mix.yarn;
 
+import hivemall.mix.network.MixServerRequest;
+import hivemall.mix.network.MixServerRequestHandler.AbstractMixServerRequestHandler;
+import hivemall.mix.network.MixServerRequestHandler.MixServerRequestInitializer;
+import io.netty.bootstrap.Bootstrap;
+import io.netty.channel.*;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.nio.NioSocketChannel;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -31,12 +38,16 @@ import org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.Capacity
 import org.junit.*;
 
 import java.io.*;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.net.URL;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
 
 public class MixServerTest {
 
@@ -105,7 +116,7 @@ public class MixServerTest {
         }
     }
 
-    @Test(timeout=90000)
+    @Test
     public void testSimpleScenario() throws Exception {
         final String[] args = {
             "--jar", appMasterJar,
@@ -156,9 +167,69 @@ public class MixServerTest {
             break;
         }
 
-        // mixClusterRunner.forceKillApplication();
-        mixCluster.get();
+        // Resource allocated from ApplicationMaster
+        AtomicReference<String> mixServers = new AtomicReference<String>();
+
+        EventLoopGroup workers = new NioEventLoopGroup();
+        MixServerRequester msgHandler = new MixServerRequester(mixServers);
+        Channel ch = startNettyClient(
+                new MixServerRequestInitializer(msgHandler), MixEnv.RESOURCE_REQUEST_PORT, workers);
+
+        // Request all the MIX servers
+        ch.writeAndFlush(new MixServerRequest()).sync();
+        int retry = 0;
+        while (mixServers.get() == null && retry++ < 32) {
+            Thread.sleep(500L);
+        }
+
+        Assert.assertNotNull(mixServers.get());
+
+        // Parse allocated MIX servers
+        String[] hosts = mixServers.get().split(Pattern.quote(MixEnv.MIXSERVER_SEPARATOR));
+        Assert.assertEquals(hosts.length, 1);
+
+        // TODO: Issue shutdown requests to MIX servers
+        mixClusterRunner.forceKillApplication();
+
         mixExec.shutdown();
-        // Assert.assertTrue(result.get());
+        mixCluster.get();
+        Assert.assertTrue(result.get());
+    }
+
+    private static Channel startNettyClient(
+            MixServerRequestInitializer initializer, int port,
+            EventLoopGroup workers)
+            throws InterruptedException {
+        Bootstrap b = new Bootstrap();
+        b.group(workers);
+        b.channel(NioSocketChannel.class);
+        b.option(ChannelOption.SO_KEEPALIVE, true);
+        b.option(ChannelOption.TCP_NODELAY, true);
+        b.handler(initializer);
+        SocketAddress remoteAddr = new InetSocketAddress("localhost", port);
+        Channel ch = b.connect(remoteAddr).sync().channel();
+        Assert.assertTrue(ch.isActive());
+        return ch;
+    }
+
+    public final class MixServerRequester extends AbstractMixServerRequestHandler {
+
+        final AtomicReference<String> mixServers;
+
+        public MixServerRequester(AtomicReference<String> ref) {
+            this.mixServers = ref;
+        }
+
+        @Override
+        protected void channelRead0(ChannelHandlerContext ctx, MixServerRequest req)
+                throws Exception {
+            mixServers.set(req.getAllocatedURIs());
+        }
+
+        @Override
+        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause)
+                throws Exception {
+            super.exceptionCaught(ctx, cause);
+        }
     }
 }

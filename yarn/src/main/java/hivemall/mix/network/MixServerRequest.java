@@ -23,9 +23,12 @@ public class MixServerRequest {
     private final int numRequest;
     private final String allocatedURIs;
 
+    public MixServerRequest() {
+        this(-1, null);
+    }
+
     public MixServerRequest(int numRequest) {
-        this.numRequest = numRequest;
-        this.allocatedURIs = null;
+        this(numRequest, null);
     }
 
     public MixServerRequest(int numRequest, String URIs) {
@@ -39,5 +42,11 @@ public class MixServerRequest {
 
     public String getAllocatedURIs() {
         return allocatedURIs;
+    }
+
+    @Override
+    public String toString() {
+        return "numRequest:" + numRequest
+                + " allocatedURIs:" + allocatedURIs;
     }
 }

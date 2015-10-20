@@ -21,17 +21,20 @@ package hivemall.mix.yarn;
 public class MixEnv {
 
     // Default port number for resource requests
-    static final int RESOURCE_REQUEST_PORT = 11213;
+    public static final int RESOURCE_REQUEST_PORT = 11213;
 
     // Default port number for report receivers
-    static final int REPORT_RECEIVER_PORT = 11214;
+    public static final int REPORT_RECEIVER_PORT = 11214;
 
     // Environment key name pointing to a cluster-wide directory
-    static final String MIXSERVER_RESOURCE_LOCATION = "MIXSERVER_RESOURCE_LOCATION";
+    public static final String MIXSERVER_RESOURCE_LOCATION = "MIXSERVER_RESOURCE_LOCATION";
 
     // Environment key name denoting a jar name for containers
-    static final String MIXSERVER_CONTAINER_APP = "MIXSERVER_CONTAINER_APP";
+    public static final String MIXSERVER_CONTAINER_APP = "MIXSERVER_CONTAINER_APP";
 
     // Interval between each MIX server's heartbeat to an application master
-    static final long MIXSERVER_HEARTBEAT_INTERVAL = 180L;
+    public static final long MIXSERVER_HEARTBEAT_INTERVAL = 180L;
+
+    // Separator for MIX servers
+    public static final String MIXSERVER_SEPARATOR = ",";
 }

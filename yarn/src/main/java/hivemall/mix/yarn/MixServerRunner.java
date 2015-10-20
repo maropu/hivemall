@@ -318,21 +318,21 @@ public final class MixServerRunner {
 
             YarnApplicationState state = report.getYarnApplicationState();
             FinalApplicationStatus dsStatus = report.getFinalApplicationStatus();
+            String appStateMsg = "(YarnState:" + state.toString()
+                    + " DSFinalStatus:" + dsStatus.toString() + ")";
             if (YarnApplicationState.FINISHED == state) {
                 if (FinalApplicationStatus.SUCCEEDED == dsStatus) {
                     return true;
                 } else {
-                    logger.info("MixServer did finished unsuccessfully "
-                            + "(YarnState:" + state.toString()
-                            + " DSFinalStatus:" + dsStatus.toString() + ")");
+                    logger.info("MixServer did finished unsuccessfully " + appStateMsg);
                     return false;
                 }
-            } else if (YarnApplicationState.KILLED == state
-                    || YarnApplicationState.FAILED == state) {
-                logger.info("MixServer did not finish "
-                        + "(YarnState:" + state.toString()
-                        + " DSFinalStatus:" + dsStatus.toString() + ")");
-                    return false;
+            } else if (YarnApplicationState.KILLED == state) {
+                logger.info("Killed by the user request " + appStateMsg);
+                return true;
+            } else if (YarnApplicationState.FAILED == state) {
+                logger.info("MixServer did not finish " + appStateMsg);
+                return false;
             }
         }
     }
