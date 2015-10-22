@@ -20,10 +20,7 @@ package hivemall.mix.network;
 
 import hivemall.utils.collections.TimestampedValue;
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.*;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 import org.apache.hadoop.yarn.api.records.ContainerId;
@@ -34,6 +31,7 @@ import java.util.concurrent.ConcurrentMap;
 
 public final class HeartbeatHandler {
 
+    @ChannelHandler.Sharable
     public final static class HeartbeatReceiver extends SimpleChannelInboundHandler<Heartbeat> {
 
         final ConcurrentMap<ContainerId, TimestampedValue<NodeId>> activeMixServers;

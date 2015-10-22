@@ -25,6 +25,7 @@ import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import org.apache.commons.io.IOUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -35,7 +36,10 @@ import org.apache.hadoop.yarn.client.api.YarnClient;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.server.MiniYARNCluster;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.CapacityScheduler;
-import org.junit.*;
+import org.junit.After;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Test;
 
 import java.io.*;
 import java.net.InetSocketAddress;
@@ -118,9 +122,10 @@ public class MixServerTest {
 
     @Test
     public void testSimpleScenario() throws Exception {
-        final String[] args = {
+        int numMixServers = 1;
+        String[] args = {
             "--jar", appMasterJar,
-            "--num_containers", "1",
+            "--num_containers", Integer.toString(numMixServers),
             "--master_memory", "128",
             "--master_vcores", "1",
             "--container_memory", "128",
@@ -167,6 +172,10 @@ public class MixServerTest {
             break;
         }
 
+        // TODO: How to wait until a netty server
+        // for resource requests is active.
+        Thread.sleep(1000L);
+
         // Resource allocated from ApplicationMaster
         AtomicReference<String> mixServers = new AtomicReference<String>();
 
@@ -184,6 +193,9 @@ public class MixServerTest {
 
         Assert.assertNotNull(mixServers.get());
 
+        verifyContainerErrLog(numMixServers, "REGISTERED");
+        verifyContainerErrLog(numMixServers, "ACTIVE");
+
         // Parse allocated MIX servers
         String[] hosts = mixServers.get().split(Pattern.quote(MixEnv.MIXSERVER_SEPARATOR));
         Assert.assertEquals(hosts.length, 1);
@@ -194,6 +206,7 @@ public class MixServerTest {
         mixExec.shutdown();
         mixCluster.get();
         Assert.assertTrue(result.get());
+        workers.shutdownGracefully();
     }
 
     private static Channel startNettyClient(
@@ -207,11 +220,26 @@ public class MixServerTest {
         b.option(ChannelOption.TCP_NODELAY, true);
         b.handler(initializer);
         SocketAddress remoteAddr = new InetSocketAddress("localhost", port);
-        Channel ch = b.connect(remoteAddr).sync().channel();
-        Assert.assertTrue(ch.isActive());
+        Channel ch = null;
+        int retry = 0;
+        while (true) {
+            try {
+                ch = b.connect(remoteAddr).sync().channel();
+                if (ch.isActive()) break;
+            } catch (Exception e) {
+                // Ignore it
+            }
+            if (++retry > 8) {
+                Assert.fail("Failed to connect to ApplicationMaster");
+                break;
+            }
+            // If inactive, retry it
+            Thread.sleep(500L);
+        }
         return ch;
     }
 
+    @ChannelHandler.Sharable
     public final class MixServerRequester extends AbstractMixServerRequestHandler {
 
         final AtomicReference<String> mixServers;
@@ -231,5 +259,50 @@ public class MixServerTest {
                 throws Exception {
             super.exceptionCaught(ctx, cause);
         }
+    }
+
+    private int verifyContainerErrLog(int numContainer, String expectedWord) {
+        int numOfWords = 0;
+        for (int i = 0; i < numNodeManager; i++) {
+            Configuration config = yarnCluster.getNodeManager(i).getConfig();
+            String logDirs = config.get(
+                    YarnConfiguration.NM_LOG_DIRS, YarnConfiguration.DEFAULT_NM_LOG_DIRS);
+            File logDir = new File(logDirs);
+            File[] logFiles = logDir.listFiles();
+            logger.info("NodeManager LogDir:"
+                    + logDirs + " (#files:" + logFiles.length + ")");
+            int logFileIndex = -1;
+            for (int j = logFiles.length - 1; j >= 0; j--) {
+                if (logFiles[j].listFiles().length == numContainer + 1) {
+                    logFileIndex = j;
+                    break;
+                }
+            }
+            if (logFileIndex == -1)
+                continue;
+
+            File[] containerDirs = logFiles[logFileIndex].listFiles();
+            for (File dir : containerDirs) {
+                for (File output : dir.listFiles()) {
+                    if (output.getName().trim().contains("stderr")) {
+                        BufferedReader br = null;
+                        try {
+                            String sCurrentLine;
+                            br = new BufferedReader(new FileReader(output));
+                            while ((sCurrentLine = br.readLine()) != null) {
+                                if (sCurrentLine.contains(expectedWord)) {
+                                    numOfWords++;
+                                }
+                            }
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        } finally {
+                            IOUtils.closeQuietly(br);
+                        }
+                    }
+                }
+            }
+        }
+        return numOfWords;
     }
 }

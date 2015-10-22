@@ -21,10 +21,7 @@ package hivemall.mix.network;
 import hivemall.mix.yarn.MixEnv;
 import hivemall.utils.collections.TimestampedValue;
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.*;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.MessageToByteEncoder;
 import io.netty.handler.codec.MessageToMessageDecoder;
@@ -41,6 +38,7 @@ public final class MixServerRequestHandler {
     public abstract static class AbstractMixServerRequestHandler
             extends SimpleChannelInboundHandler<MixServerRequest> {}
 
+    @ChannelHandler.Sharable
     public final static class MixServerRequestReceiver extends AbstractMixServerRequestHandler {
 
         final ConcurrentMap<ContainerId, TimestampedValue<NodeId>> activeMixServers;
