@@ -87,4 +87,7 @@ public final class NumberUtils {
         }
     }
 
+    public static boolean isFinite(double ret) {
+        return false;
+    }
 }

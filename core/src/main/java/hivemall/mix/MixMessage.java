@@ -28,7 +28,7 @@ public final class MixMessage implements Externalizable {
     private MixEventName event;
     private Object feature;
     private float weight;
-    private float covariance;
+    private float covariance; // used in diff
     private short clock;
     private int deltaUpdates;
     private boolean cancelRequest;
@@ -36,6 +36,10 @@ public final class MixMessage implements Externalizable {
     private String groupID;
 
     public MixMessage() {} // for Externalizable
+
+    public MixMessage(MixEventName event, Object feature, float weight) {
+        this(event, feature, weight, 0.f, (short)0, 0, false);
+    }
 
     public MixMessage(MixEventName event, Object feature, float weight, short clock, int deltaUpdates) {
         this(event, feature, weight, 0.f, clock, deltaUpdates, false);
@@ -84,6 +88,8 @@ public final class MixMessage implements Externalizable {
                     return average;
                 case 2:
                     return argminKLD;
+                case 3:
+                    return closeGroup;
                 default:
                     throw new IllegalArgumentException("Illegal ID: " + b);
             }

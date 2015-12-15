@@ -20,6 +20,8 @@ package hivemall.mix.server;
 
 import hivemall.mix.MixMessage;
 import hivemall.mix.MixMessage.MixEventName;
+import hivemall.mix.hivemall.mix.solvers.Adam;
+import hivemall.mix.hivemall.mix.solvers.Solver;
 import hivemall.mix.store.PartialArgminKLD;
 import hivemall.mix.store.PartialAverage;
 import hivemall.mix.store.PartialResult;
@@ -28,7 +30,10 @@ import hivemall.mix.store.SessionStore;
 import io.netty.channel.ChannelHandler.Sharable;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 import javax.annotation.Nonnegative;
@@ -36,11 +41,14 @@ import javax.annotation.Nonnull;
 
 @Sharable
 public final class MixServerHandler extends SimpleChannelInboundHandler<MixMessage> {
+    private static final Log logger = LogFactory.getLog(MixServerHandler.class);
 
     @Nonnull
     private final SessionStore sessionStore;
     private final int syncThreshold;
     private final float scale;
+
+    private final ConcurrentMap<String, Solver> sessions = new ConcurrentHashMap<String, Solver>();
 
     public MixServerHandler(@Nonnull SessionStore sessionStore, @Nonnegative int syncThreshold, @Nonnegative float scale) {
         super();
@@ -53,15 +61,35 @@ public final class MixServerHandler extends SimpleChannelInboundHandler<MixMessa
     protected void channelRead0(ChannelHandlerContext ctx, MixMessage msg) throws Exception {
         final MixEventName event = msg.getEvent();
         switch (event) {
-            case average:
             case argminKLD: {
                 SessionObject session = getSession(msg);
                 PartialResult partial = getPartialResult(msg, session);
                 mix(ctx, msg, partial, session);
                 break;
             }
-            case closeGroup: {
-                closeGroup(msg);
+            case average: { // adamSolver
+                String groupID = msg.getGroupID();
+                if(groupID == null) {
+                    throw new IllegalStateException("JobID is not set in the request message");
+                }
+                Solver solv = sessions.get(groupID);
+                if (solv == null) {
+                    solv = new Adam();
+                    final Solver existing = sessions.putIfAbsent(groupID, solv);
+                    if (existing != null) {
+                        solv = existing;
+                    }
+                }
+                final Object feature = msg.getFeature();
+                final float weight = msg.getWeight();
+                final float diff = msg.getCovariance();
+                final float newWeight = solv.update(feature, weight, diff);
+
+                logger.info("group=" + groupID + ", feature=" + feature
+                        + ", weight=" + weight + "->" + newWeight + ", diff=" + diff
+                        + ", |delta|=" + Math.abs(newWeight - weight));
+
+                ctx.writeAndFlush(new MixMessage(event, feature, newWeight));
                 break;
             }
             default:
@@ -144,7 +172,6 @@ public final class MixServerHandler extends SimpleChannelInboundHandler<MixMessa
                     responseMsg = new MixMessage(event, feature, averagedWeight, meanCovar, globalClock, 0 /* deltaUpdates */);
                 }
             }
-
         } finally {
             partial.unlock();
         }

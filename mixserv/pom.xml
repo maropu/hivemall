@@ -139,6 +139,16 @@
 					</headerDefinitions>
 				</configuration>
 			</plugin>
+			<!-- hivemall-mixserv-xx.jar -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-jar-plugin</artifactId>
+				<version>2.5</version>
+				<configuration>
+					<finalName>${project.artifactId}-${project.version}</finalName>
+					<outputDirectory>${project.parent.build.directory}</outputDirectory>
+				</configuration>
+			</plugin>
 			<!-- hivemall-mixserv-xx-fat.jar including all dependencies -->
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
