@@ -359,21 +359,6 @@ public final class HiveUtils {
                 + TypeInfoUtils.getTypeInfoFromObjectInspector(numberOI));
     }
 
-    @SuppressWarnings("unchecked")
-    public static float asFloat(@Nonnull double input) {
-        return (float) input;
-    }
-
-    @Nonnull
-    @SuppressWarnings("unchecked")
-    public static float[] asFloatArray(@Nonnull double[] input) {
-        float[] output = new float[input.length];
-        for (int i = 0; i < input.length; i++) {
-            output[i] = (float) input[i];
-        }
-        return output;
-    }
-
     @Nonnull
     public static double[] asDoubleArray(@Nullable Object argObj,
             @Nonnull ListObjectInspector listOI, @Nonnull PrimitiveObjectInspector elemOI) {
