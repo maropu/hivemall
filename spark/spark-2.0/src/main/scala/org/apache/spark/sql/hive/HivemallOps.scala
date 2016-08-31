@@ -29,6 +29,7 @@ import org.apache.spark.sql.catalyst.plans.logical.{Generate, LogicalPlan}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.hive.HiveShim.HiveFunctionWrapper
 import org.apache.spark.sql.types._
+import source.XGBoostFileFormat
 
 /**
  * A wrapper of hivemall for DataFrame.
@@ -39,6 +40,7 @@ import org.apache.spark.sql.types._
  * @groupname regression
  * @groupname classifier
  * @groupname classifier.multiclass
+ * @groupname xgboost
  * @groupname ensemble
  * @groupname knn.similarity
  * @groupname knn.distance
@@ -511,6 +513,84 @@ final class HivemallOps(df: DataFrame) extends Logging {
   }
 
   /**
+   * @see hivemall.xgboost.regression.XGBoostRegressionUDTF
+   * @group xgboost
+   */
+  @scala.annotation.varargs
+  def train_xgboost_regr(exprs: Column*): DataFrame = withTypedPlan {
+     Generate(HiveGenericUDTF(
+        "train_xgboost_regr",
+        new HiveFunctionWrapper(
+          "hivemall.xgboost.regression.XGBoostRegressionUDTF"),
+        setMixServs(exprs: _*).map(_.expr)),
+      join = false, outer = false, None,
+      Seq("model_id", "pred_model").map(UnresolvedAttribute(_)),
+      df.logicalPlan)
+  }
+
+  /**
+   * @see hivemall.xgboost.classification.XGBoostBinaryClassifierUDTF
+   * @group xgboost
+   */
+  @scala.annotation.varargs
+  def train_xgboost_classifier(exprs: Column*): DataFrame = withTypedPlan {
+     Generate(HiveGenericUDTF(
+        "train_xgboost_classifier",
+        new HiveFunctionWrapper(
+          "hivemall.xgboost.classification.XGBoostBinaryClassifierUDTF"),
+        setMixServs(exprs: _*).map(_.expr)),
+      join = false, outer = false, None,
+      Seq("model_id", "pred_model").map(UnresolvedAttribute(_)),
+      df.logicalPlan)
+  }
+
+  /**
+   * @see hivemall.xgboost.classification.XGBoostMulticlassClassifierUDTF
+   * @group xgboost
+   */
+  @scala.annotation.varargs
+  def train_xgboost_multiclass_classifier(exprs: Column*): DataFrame = withTypedPlan {
+     Generate(HiveGenericUDTF(
+        "train_xgboost_multiclass_classifier",
+        new HiveFunctionWrapper(
+          "hivemall.xgboost.classification.XGBoostMulticlassClassifierUDTF"),
+        setMixServs(exprs: _*).map(_.expr)),
+      join = false, outer = false, None,
+      Seq("model_id", "pred_model").map(UnresolvedAttribute(_)),
+      df.logicalPlan)
+  }
+
+  /**
+   * @see hivemall.xgboost.tools.XGBoostPredictUDTF
+   * @group xgboost
+   */
+  @scala.annotation.varargs
+  def xgboost_predict(exprs: Column*): DataFrame = withTypedPlan {
+     Generate(HiveGenericUDTF(
+        "xgboost_predict",
+        new HiveFunctionWrapper("hivemall.xgboost.tools.XGBoostPredictUDTF"),
+        setMixServs(exprs: _*).map(_.expr)),
+      join = false, outer = false, None,
+      Seq("rowid", "predicted").map(UnresolvedAttribute(_)),
+      df.logicalPlan)
+  }
+
+  /**
+   * @see hivemall.xgboost.tools.XGBoostMulticlassPredictUDTF
+   * @group xgboost
+   */
+  @scala.annotation.varargs
+  def xgboost_multiclass_predict(exprs: Column*): DataFrame = withTypedPlan {
+     Generate(HiveGenericUDTF(
+        "xgboost_multiclass_predict",
+        new HiveFunctionWrapper("hivemall.xgboost.tools.XGBoostMulticlassPredictUDTF "),
+        setMixServs(exprs: _*).map(_.expr)),
+      join = false, outer = false, None,
+      Seq("rowid", "label", "probability").map(UnresolvedAttribute(_)),
+      df.logicalPlan)
+  }
+
+  /**
    * Groups the [[DataFrame]] using the specified columns, so we can run aggregation on them.
    * See [[RelationalGroupedDatasetEx]] for all the available aggregate functions.
    *
@@ -742,6 +822,14 @@ final class HivemallOps(df: DataFrame) extends Logging {
 }
 
 object HivemallOps {
+
+  /**
+   * Model files for libxgboost are loaded as follows;
+   *
+   * import HivemallOps._
+   * val modelDf = sparkSession.read.format(xgboostFormat).load(modelDir.getCanonicalPath)
+   */
+  val xgboost = classOf[XGBoostFileFormat].getName
 
   /**
    * Implicitly inject the [[HivemallOps]] into [[DataFrame]].
