@@ -529,7 +529,7 @@ final class HivemallOpsWithFeatureSuite extends HivemallFeatureQueryTest {
     TestUtils.expectResult(precision < 0.70, s"Low precision -> func:${func} value:${precision}")
   }
 
-  ignore("check regression precision") {
+  test("check regression precision") {
     Seq(
       "train_adadelta",
       "train_adagrad",
@@ -546,7 +546,7 @@ final class HivemallOpsWithFeatureSuite extends HivemallFeatureQueryTest {
     }
   }
 
-  ignore("check classifier precision") {
+  test("check classifier precision") {
     Seq(
       "train_perceptron",
       "train_pa",
