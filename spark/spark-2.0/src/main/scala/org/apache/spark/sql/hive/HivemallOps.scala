@@ -19,6 +19,7 @@ package org.apache.spark.sql.hive
 
 import java.util.UUID
 
+
 import scala.collection.JavaConverters._
 
 import org.apache.spark.annotation.Experimental
@@ -30,12 +31,19 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
 import org.apache.spark.sql.catalyst.encoders.RowEncoder
 import org.apache.spark.sql.catalyst.expressions.{EachTopK, Expression, Literal, NamedExpression, UserDefinedGenerator}
+import org.apache.spark.sql.catalyst.plans.Inner
 import org.apache.spark.sql.catalyst.plans.logical.{Generate, LogicalPlan, Project}
 import org.apache.spark.sql.catalyst.util._
+import org.apache.spark.sql.catalyst.planning.ExtractEquiJoinKeys
+import org.apache.spark.sql.catalyst.plans.logical.Join
+import org.apache.spark.sql.execution.LogicalRDD
+import org.apache.spark.sql.execution.joins.TopKJoinExec
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.hive.HiveShim.HiveFunctionWrapper
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
+import org.apache.spark.broadcast.Broadcast
+import org.apache.spark.util.KnownSizeEstimation
 
 /**
  * Hivemall wrapper and some utility functions for DataFrame.
@@ -820,6 +828,74 @@ final class HivemallOps(df: DataFrame) extends Logging {
     each_top_k(kInt, groupStr, valueStr, argStrs: _*)
   }
 
+  def broadcastRelation(rightDf: DataFrame, joinExprs: Column): Broadcast[KnownSizeEstimation] = {
+    val logicalPlan = Join(df.logicalPlan, rightDf.logicalPlan, Inner, Option(joinExprs.expr))
+    _analyzer.execute(logicalPlan) match {
+      case ExtractEquiJoinKeys(_, leftKeys, rightKeys, condition, _, _) =>
+        TopKJoinExec.broadcastRelation(rightDf, rightKeys)(_sparkSession.sparkContext)
+          .asInstanceOf[Broadcast[KnownSizeEstimation]]
+    }
+  }
+
+  def topk_join1(k: Column, rightDf: DataFrame, joinExprs: Column, score: Column): DataFrame = {
+    val kInt = k.expr match {
+      case Literal(v: Any, IntegerType) => v.asInstanceOf[Int]
+      case e => throw new AnalysisException("`k` must be integer, however " + e)
+    }
+    val logicalPlan = Project(
+      score.named :: Nil,
+      Join(df.logicalPlan, rightDf.logicalPlan, Inner, Option(joinExprs.expr))
+    )
+    val topKJoin = _analyzer.execute(logicalPlan) match {
+      case Project(scoreExpr, join) => join match {
+        case ExtractEquiJoinKeys(_, leftKeys, rightKeys, condition, _, _) =>
+          TopKJoinExec.createWithBroadcastExec(
+            k = kInt,
+            scoreExpr.head,
+            leftKeys,
+            rightKeys,
+            condition = condition,
+            null,
+            false,
+            left = df.queryExecution.executedPlan,
+            right = rightDf.queryExecution.executedPlan
+          )
+      }
+    }
+    val logicalRdd = LogicalRDD(topKJoin.schema.toAttributes, topKJoin.execute)(_sparkSession)
+    Dataset.ofRows(_sparkSession, logicalRdd)
+  }
+
+  def topk_join2(k: Column, rightDf: DataFrame, rightRel: Broadcast[KnownSizeEstimation],
+      joinExprs: Column, score: Column): DataFrame = {
+    val kInt = k.expr match {
+      case Literal(v: Any, IntegerType) => v.asInstanceOf[Int]
+      case e => throw new AnalysisException("`k` must be integer, however " + e)
+    }
+    val logicalPlan = Project(
+      score.named :: Nil,
+      Join(df.logicalPlan, rightDf.logicalPlan, Inner, Option(joinExprs.expr))
+    )
+    val topKJoin = _analyzer.execute(logicalPlan) match {
+      case Project(scoreExpr, join) => join match {
+        case ExtractEquiJoinKeys(_, leftKeys, rightKeys, condition, _, _) =>
+          TopKJoinExec.createWithBroadcastExec(
+            k = kInt,
+            scoreExpr.head,
+            leftKeys,
+            rightKeys,
+            condition = condition,
+            rightRel,
+            true,
+            left = df.queryExecution.executedPlan,
+            right = rightDf.queryExecution.executedPlan
+          )
+      }
+    }
+    val logicalRdd = LogicalRDD(topKJoin.schema.toAttributes, topKJoin.execute)(_sparkSession)
+    Dataset.ofRows(_sparkSession, logicalRdd)
+  }
+
   /**
    * Returns a new [[DataFrame]] with columns renamed.
    * This is a wrapper for DataFrame#toDF.
@@ -877,6 +953,9 @@ final class HivemallOps(df: DataFrame) extends Logging {
       exprs
     }
   }
+
+  private[this] val _sparkSession = df.sparkSession
+  private[this] val _analyzer = _sparkSession.sessionState.analyzer
 
   @inline private[this] def toHivemallFeatureDf(exprs: Column*): Seq[Column] = {
     df.select(exprs: _*).queryExecution.analyzed.schema.zip(exprs).map {
