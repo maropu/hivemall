@@ -37,7 +37,7 @@ import org.apache.spark.sql.catalyst.util._
 import org.apache.spark.sql.catalyst.planning.ExtractEquiJoinKeys
 import org.apache.spark.sql.catalyst.plans.logical.Join
 import org.apache.spark.sql.execution.LogicalRDD
-import org.apache.spark.sql.execution.joins.TopKJoinExec
+import org.apache.spark.sql.execution.joins._
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.hive.HiveShim.HiveFunctionWrapper
 import org.apache.spark.sql.types._
@@ -832,7 +832,7 @@ final class HivemallOps(df: DataFrame) extends Logging {
     val logicalPlan = Join(df.logicalPlan, rightDf.logicalPlan, Inner, Option(joinExprs.expr))
     _analyzer.execute(logicalPlan) match {
       case ExtractEquiJoinKeys(_, leftKeys, rightKeys, condition, _, _) =>
-        TopKJoinExec.broadcastRelation(rightDf, rightKeys)(_sparkSession.sparkContext)
+        TopKBroadcastJoinExec.broadcastRelation(rightDf, rightKeys)(_sparkSession.sparkContext)
           .asInstanceOf[Broadcast[KnownSizeEstimation]]
     }
   }
@@ -849,7 +849,7 @@ final class HivemallOps(df: DataFrame) extends Logging {
     val topKJoin = _analyzer.execute(logicalPlan) match {
       case Project(scoreExpr, join) => join match {
         case ExtractEquiJoinKeys(_, leftKeys, rightKeys, condition, _, _) =>
-          TopKJoinExec.createWithBroadcastExec(
+          TopKBroadcastJoinExec.createWithBroadcastExec(
             k = kInt,
             scoreExpr.head,
             leftKeys,
@@ -879,7 +879,7 @@ final class HivemallOps(df: DataFrame) extends Logging {
     val topKJoin = _analyzer.execute(logicalPlan) match {
       case Project(scoreExpr, join) => join match {
         case ExtractEquiJoinKeys(_, leftKeys, rightKeys, condition, _, _) =>
-          TopKJoinExec.createWithBroadcastExec(
+          TopKBroadcastJoinExec.createWithBroadcastExec(
             k = kInt,
             scoreExpr.head,
             leftKeys,
@@ -887,6 +887,33 @@ final class HivemallOps(df: DataFrame) extends Logging {
             condition = condition,
             rightRel,
             true,
+            left = df.queryExecution.executedPlan,
+            right = rightDf.queryExecution.executedPlan
+          )
+      }
+    }
+    val logicalRdd = LogicalRDD(topKJoin.schema.toAttributes, topKJoin.execute)(_sparkSession)
+    Dataset.ofRows(_sparkSession, logicalRdd)
+  }
+
+  def topk_join3(k: Column, rightDf: DataFrame, joinExprs: Column, score: Column): DataFrame = {
+    val kInt = k.expr match {
+      case Literal(v: Any, IntegerType) => v.asInstanceOf[Int]
+      case e => throw new AnalysisException("`k` must be integer, however " + e)
+    }
+    val logicalPlan = Project(
+      score.named :: Nil,
+      Join(df.logicalPlan, rightDf.logicalPlan, Inner, Option(joinExprs.expr))
+    )
+    val topKJoin = _analyzer.execute(logicalPlan) match {
+      case Project(scoreExpr, join) => join match {
+        case ExtractEquiJoinKeys(_, leftKeys, rightKeys, condition, _, _) =>
+          TopKShuffledHashJoinExec.createWithExchangeExec(
+            k = kInt,
+            scoreExpr.head,
+            leftKeys,
+            rightKeys,
+            condition = condition,
             left = df.queryExecution.executedPlan,
             right = rightDf.queryExecution.executedPlan
           )

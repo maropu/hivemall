@@ -38,7 +38,7 @@ import org.apache.spark.sql.types._
 import org.apache.spark.util.BoundedPriorityQueue
 import org.apache.spark.util.KnownSizeEstimation
 
-case class TopKJoinExec(
+case class TopKBroadcastJoinExec(
     k: Int,
     scoreExpression: Expression,
     leftKeys: Seq[Expression],
@@ -156,7 +156,7 @@ case class TopKJoinExec(
   }
 }
 
-private[sql] object TopKJoinExec {
+private[sql] object TopKBroadcastJoinExec {
 
   def createWithBroadcastExec(
       k: Int,
@@ -168,7 +168,7 @@ private[sql] object TopKJoinExec {
       reusedBroadcast: Boolean,
       left: SparkPlan,
       right: SparkPlan): SparkPlan = {
-    val op = TopKJoinExec(k, scoreExpr, leftKeys, rightKeys, BuildRight, condition,
+    val op = TopKBroadcastJoinExec(k, scoreExpr, leftKeys, rightKeys, BuildRight, condition,
       broadcastRelation.asInstanceOf[Broadcast[HashedRelation]], reusedBroadcast, left, right)
     val requiredChildDistributions = op.requiredChildDistribution
     var children: Seq[SparkPlan] = op.children
