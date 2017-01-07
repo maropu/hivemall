@@ -38,7 +38,8 @@ private[spark] object CSVFormat {
       override def apply(records: Iterator[Array[Byte]]): Iterator[InternalRow] = {
         records.flatMap { r =>
           val recordStr = new String(r, csvOptions.charset)
-          rowParser(lineReader.parseLine(recordStr), 0)
+          val line = lineReader.parseLine(recordStr)
+          if (line != null) rowParser(line, 0) else None
         }
       }
     }

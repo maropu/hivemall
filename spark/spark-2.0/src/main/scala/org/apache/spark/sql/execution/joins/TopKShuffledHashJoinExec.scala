@@ -28,6 +28,8 @@ import org.apache.spark.sql.catalyst.util.TypeUtils
 import org.apache.spark.sql.execution._
 import org.apache.spark.sql.execution.metric._
 import org.apache.spark.util.BoundedPriorityQueue
+import org.apache.spark.util.CompletionIterator
+import utils.InternalRowPriorityQueue
 
 case class TopKShuffledHashJoinExec(
     k: Int,
@@ -43,12 +45,12 @@ case class TopKShuffledHashJoinExec(
 
   require(k != 0, "`k` must not have 0")
 
-  override val joinType: JoinType = Inner
+  private[this] var startTime: Long = 0
+  private[this] var _numProcessedRows: Long = 0
+  private[this] var _numInputRows: Long = 0
+  private[this] var _numOutputRows: Long = 0
 
-  override lazy val metrics = Map(
-    "numOutputRows" -> SQLMetrics.createMetric(sparkContext, "number of output rows"),
-    "buildDataSize" -> SQLMetrics.createSizeMetric(sparkContext, "data size of build side"),
-    "buildTime" -> SQLMetrics.createTimingMetric(sparkContext, "time to build hash map"))
+  override val joinType: JoinType = Inner
 
   private[this] lazy val scoreType = scoreExpression.dataType
   private[this] lazy val scoreOrdering = {
@@ -63,8 +65,8 @@ case class TopKShuffledHashJoinExec(
 
   private[this] lazy val reverseScoreOrdering = scoreOrdering.reverse
 
-  private[this] val queue: BoundedPriorityQueue[QueueType] = {
-    new BoundedPriorityQueue(Math.abs(k))(new Ordering[QueueType] {
+  private[this] val queue: InternalRowPriorityQueue = {
+    new InternalRowPriorityQueue(Math.abs(k))(new Ordering[QueueType] {
       override def compare(x: QueueType, y: QueueType): Int =
         scoreOrdering.compare(x._1, y._1)
     })
@@ -86,16 +88,23 @@ case class TopKShuffledHashJoinExec(
     ClusteredDistribution(leftKeys) :: ClusteredDistribution(rightKeys) :: Nil
 
   private def buildHashedRelation(iter: Iterator[InternalRow]): HashedRelation = {
-    val buildDataSize = longMetric("buildDataSize")
-    val buildTime = longMetric("buildTime")
-    val start = System.nanoTime()
+    // val buildDataSize = longMetric("buildDataSize")
+    // val buildTime = longMetric("buildTime")
+    // val start = System.nanoTime()
     val context = TaskContext.get()
     val relation = HashedRelation(iter, buildKeys, taskMemoryManager = context.taskMemoryManager())
-    buildTime += (System.nanoTime() - start) / 1000000
-    buildDataSize += relation.estimatedSize
+    // buildTime += (System.nanoTime() - start) / 1000000
+    // buildDataSize += relation.estimatedSize
     // This relation is usually used until the end of task.
     context.addTaskCompletionListener(_ => relation.close())
     relation
+  }
+
+  def close(): Unit = {
+    val tc = TaskContext.get()
+    logInfo(s"StageID:${tc.stageId} TaskID:${tc.taskAttemptId()} #Processed:${_numProcessedRows}" +
+      s" #inputs: ${_numInputRows} #outputs:${_numOutputRows}" +
+      " Elapsed:" + ((System.nanoTime() - startTime) / 1000000))
   }
 
   protected def topKInnerJoin(
@@ -105,6 +114,7 @@ case class TopKShuffledHashJoinExec(
     val joinRow = new JoinedRow
     val joinKeysProj = streamSideKeyGenerator()
     val joinedIter = streamedIter.flatMap { srow =>
+      _numInputRows += 1
       joinRow.withLeft(srow)
       val joinKeys = joinKeysProj(srow) // `joinKeys` is also a grouping key
       val matches = hashedRelation.get(joinKeys)
@@ -124,7 +134,8 @@ case class TopKShuffledHashJoinExec(
         }
          */
         matches.map(joinRow.withRight(_)).filter(boundCondition).foreach { resultRow =>
-          queue += Tuple2(scoreProjection(resultRow).get(0, scoreType), resultRow.copy())
+          _numProcessedRows += 1
+          queue += Tuple2(scoreProjection(resultRow).get(0, scoreType), resultRow)
         }
         val iter = queue.iterator.toSeq.sortBy(_._1)(reverseScoreOrdering).map(_._2)
         queue.clear
@@ -134,13 +145,17 @@ case class TopKShuffledHashJoinExec(
       }
     }
     val resultProj = createResultProjection
-    (joinedIter ++ queue.iterator.toSeq.sortBy(_._1)(reverseScoreOrdering).map(_._2)).map { r =>
-      // numOutputRows += 1
-      resultProj(r)
-    }
+    CompletionIterator[InternalRow, Iterator[InternalRow]](
+      (joinedIter ++ queue.iterator.toSeq.sortBy(_._1)(reverseScoreOrdering)
+          .map(_._2)).map { r =>
+        _numOutputRows += 1
+        resultProj(r)
+      },
+      close())
   }
 
   override protected def doExecute(): RDD[InternalRow] = {
+    startTime = System.nanoTime()
     // val numOutputRows = longMetric("numOutputRows")
     streamedPlan.execute().zipPartitions(buildPlan.execute()) { (streamIter, buildIter) =>
       val hashed = buildHashedRelation(buildIter)
