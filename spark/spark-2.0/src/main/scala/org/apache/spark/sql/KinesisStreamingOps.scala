@@ -17,6 +17,7 @@
 
 package org.apache.spark.sql
 
+import catalyst.InternalRow
 import org.apache.spark.rdd.RDD
 import org.apache.spark.streaming.dstream.DStream
 import org.apache.spark.sql.types._
@@ -31,6 +32,46 @@ final class KinesisStreamingOps(ds: DStream[Array[Byte]]) {
       val logicalRdd = LogicalRDD(schema.toAttributes, rdd.mapPartitionsInternal(csvReader))(spark)
       val df = Dataset.ofRows(spark, logicalRdd)
       f(df).rdd
+    }
+  }
+
+  def execute1(schema: StructType, options: Map[String, String], f: DataFrame => DataFrame)
+      (implicit spark: SparkSession): DStream[Row] = {
+    val csvReader = CSVFormat.buildReader1(spark, schema, options)
+    ds.transform[Row] { rdd: RDD[Array[Byte]] =>
+      val logicalRdd = LogicalRDD(schema.toAttributes, rdd.mapPartitionsInternal(csvReader))(spark)
+      val df = Dataset.ofRows(spark, logicalRdd)
+      f(df).rdd
+    }
+  }
+
+  def execute2(schema: StructType, options: Map[String, String], f: DataFrame => DataFrame)
+      (implicit spark: SparkSession): DStream[InternalRow] = {
+    val csvReader = CSVFormat.buildReader1(spark, schema, options)
+    ds.transform[InternalRow] { rdd: RDD[Array[Byte]] =>
+      rdd.mapPartitionsInternal(csvReader)
+    }
+  }
+
+  def execute3(schema: StructType, options: Map[String, String], f: DataFrame => DataFrame)
+      (implicit spark: SparkSession): DStream[Int] = {
+    ds.transform[Int] { rdd: RDD[Array[Byte]] =>
+      rdd.map(r => r.size)
+    }
+  }
+
+  def execute4(schema: StructType, options: Map[String, String], f: DataFrame => DataFrame)
+      (implicit spark: SparkSession): DStream[Int] = {
+    ds.transform[Int] { rdd: RDD[Array[Byte]] =>
+      rdd.mapPartitionsInternal(iter => iter.map(_.size))
+    }
+  }
+
+  def execute5(schema: StructType, options: Map[String, String], f: DataFrame => DataFrame)
+      (implicit spark: SparkSession): DStream[InternalRow] = {
+    val csvReader = CSVFormat.buildReader2(spark, schema, options)
+    ds.transform[InternalRow] { rdd: RDD[Array[Byte]] =>
+      rdd.mapPartitionsInternal(csvReader)
     }
   }
 }

@@ -816,6 +816,24 @@ final class HivemallOps(df: DataFrame) extends Logging {
     Project(projectList, generator)
   }
 
+  def each_top_k_aggregate(k: Int, group: String, score: String, args: String*)
+    : DataFrame = withTypedPlan {
+    val childrenAttributes = df.logicalPlan.output
+    val generator = Generate(
+      EachTopK(
+        k,
+        df.resolve(group),
+        df.resolve(score),
+        childrenAttributes
+      ),
+      join = false, outer = false, None,
+      (Seq("rank") ++ childrenAttributes.map(_.name)).map(UnresolvedAttribute(_)),
+      df.logicalPlan)
+    val attributes = generator.generatedSet
+    val projectList = (Seq("rank") ++ args).map(s => attributes.find(_.name == s).get)
+    Project(projectList, generator)
+  }
+
   @deprecated("use each_top_k(Int, String, String, String*) instead", "0.5.0")
   def each_top_k(k: Column, group: Column, value: Column, args: Column*): DataFrame = {
     val kInt = k.expr match {
